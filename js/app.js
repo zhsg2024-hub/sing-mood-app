@@ -4,9 +4,16 @@
 (() => {
   // 全局配置（可选接入第三方 API）
   window.APP_CONFIG = {
-    // openaiKey: "sk-...",        // 可选：AI 文案
+    // openaiKey: "sk-...",        // 或在页面 ASR 设置里填写（存本机）
     // auddToken: "...",           // 可选：AudD 识曲 API
+    // whisperModel: "whisper-1",
   };
+
+  // 从本机恢复 ASR Key
+  (function loadStoredAsrKey() {
+    const k = localStorage.getItem("sing_openai_key");
+    if (k) window.APP_CONFIG.openaiKey = k;
+  })();
 
   // --- 状态 ---
   const state = {
@@ -550,9 +557,65 @@
   }
   refreshLangHint();
 
+  // --- ASR 设置 ---
+  function updateAsrUI() {
+    const statusEl = document.getElementById("asrStatus");
+    const badge = document.getElementById("asrBadge");
+    const on = ASR.isEnabled();
+    if (statusEl) {
+      statusEl.textContent = on
+        ? "✓ Whisper ASR 已启用 · 录音后将用 AI 转写歌词"
+        : "未启用 · 使用浏览器识别（准确度较低）";
+      statusEl.classList.toggle("on", on);
+    }
+    if (badge) badge.hidden = !on;
+  }
+
+  function initAsrSettings() {
+    const input = document.getElementById("openaiKeyInput");
+    if (input && ASR.isEnabled()) {
+      input.placeholder = "已保存 Key · 输入新 Key 可覆盖";
+    }
+
+    document.getElementById("saveAsrKeyBtn")?.addEventListener("click", () => {
+      const raw = document.getElementById("openaiKeyInput")?.value?.trim();
+      if (!raw) {
+        showToast("请输入 OpenAI API Key");
+        return;
+      }
+      if (!raw.startsWith("sk-")) {
+        showToast("Key 格式应为 sk- 开头");
+        return;
+      }
+      localStorage.setItem("sing_openai_key", raw);
+      window.APP_CONFIG.openaiKey = raw;
+      updateAsrUI();
+      showToast("Whisper ASR 已启用");
+    });
+
+    document.getElementById("clearAsrKeyBtn")?.addEventListener("click", () => {
+      localStorage.removeItem("sing_openai_key");
+      delete window.APP_CONFIG.openaiKey;
+      const inp = document.getElementById("openaiKeyInput");
+      if (inp) inp.value = "";
+      updateAsrUI();
+      showToast("已清除 ASR 密钥");
+    });
+
+    updateAsrUI();
+  }
+  initAsrSettings();
+
   function startSpeechRecognition() {
     stopSpeechRecognition();
     state.recognizedText = "";
+
+    // 已启用 Whisper 时不跑浏览器识别（不准且浪费）
+    if (ASR.isEnabled()) {
+      recordStatus.textContent = "录音中 · 松手后用 AI 识别歌词";
+      return;
+    }
+
     const langs = getRecognitionLangs();
     state.recognizers = langs.map((lang) => createSpeechRecognition(lang)).filter(Boolean);
     state.recognizers.forEach((rec) => {
@@ -703,21 +766,47 @@
       return;
     }
 
-    showLoading("正在匹配歌曲…");
+    let recognizedText = state.recognizedText;
 
     try {
-      // 可选：AudD API 识曲
+      if (ASR.isEnabled()) {
+        showLoading("Whisper 正在识别歌词…");
+        try {
+          const asr = await ASR.transcribe(state.audioBlob, { langMode: state.langMode });
+          if (asr?.text) {
+            recognizedText = ASR.mergeTranscripts(asr.text, state.recognizedText);
+            recordStatus.textContent = `ASR：${recognizedText.slice(0, 40)}${recognizedText.length > 40 ? "…" : ""}`;
+          }
+        } catch (asrErr) {
+          console.error(asrErr);
+          showToast(`ASR 失败：${asrErr.message}${recognizedText ? " · 使用备用识别" : ""}`);
+          if (!recognizedText) {
+            hideLoading();
+            recordStatus.textContent = "ASR 失败 · 请检查 Key 或重试";
+            return;
+          }
+        }
+      }
+
+      if (!recognizedText?.trim()) {
+        hideLoading();
+        showToast("没听清歌词，请大声念出歌名或歌词片段");
+        recordStatus.textContent = "未识别到文字 · 可重试";
+        return;
+      }
+
+      showLoading("正在匹配歌曲…");
+
       let auddResult = null;
       if (window.APP_CONFIG.auddToken) {
         auddResult = await tryAuddRecognition(state.audioBlob);
       }
 
-      const match = await SongMatcher.match(state.recognizedText, state.audioBlob);
+      const match = await SongMatcher.match(recognizedText, state.audioBlob);
 
       hideLoading();
 
       if (auddResult) {
-        // 若 API 返回结果，尝试与本地库合并
         const localMatch = SONG_DATABASE.find(
           (s) => s.title.includes(auddResult.title) || auddResult.title.includes(s.title)
         );
@@ -729,12 +818,14 @@
         }
       } else if (match) {
         state.matchResult = match;
+        if (ASR.isEnabled()) state.matchResult.method = "asr";
       } else {
-        showToast("暂未匹配到歌曲，试试切换语言或念出歌名/歌词");
-        recordStatus.textContent = "未匹配 · 可重试";
+        showToast(`未匹配到歌曲 · 识别文字：${recognizedText.slice(0, 20)}…`);
+        recordStatus.textContent = "未匹配 · 可换语言或文字输入";
         return;
       }
 
+      state.recognizedText = recognizedText;
       openSingScreen(state.matchResult);
     } catch (err) {
       hideLoading();
@@ -765,7 +856,8 @@
 
     $("#songTitle").textContent = song.title;
     $("#songArtist").textContent = song.artist;
-    $("#matchBadge").textContent = `匹配度 ${confidence}% · ${matchResult.method === "api" ? "在线识别" : "智能匹配"}`;
+    const methodLabels = { api: "在线识曲", asr: "Whisper ASR", text: "智能匹配" };
+    $("#matchBadge").textContent = `匹配度 ${confidence}% · ${methodLabels[matchResult.method] || "智能匹配"}`;
     $("#bpmLabel").textContent = `${bpm} BPM`;
 
     const lines = LyricsEngine.parseLrc(song.lrc);

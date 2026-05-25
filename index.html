@@ -104,8 +104,26 @@
         </div>
       </div>
 
+      <!-- ASR 设置（OpenAI Whisper） -->
+      <details class="card asr-settings" id="asrSettings">
+        <summary>⚙️ 语音识别 ASR（提高歌词识别准确率）</summary>
+        <p class="asr-desc">
+          浏览器自带识别对唱歌很不准。接入 <strong>OpenAI Whisper</strong> 后可大幅提升。
+          密钥仅保存在本机，不会上传到我们服务器。
+        </p>
+        <label for="openaiKeyInput">OpenAI API Key</label>
+        <input type="password" class="asr-key-input" id="openaiKeyInput" placeholder="sk-..." autocomplete="off" />
+        <div class="btn-row">
+          <button type="button" class="primary-btn" id="saveAsrKeyBtn">保存并启用</button>
+          <button type="button" class="secondary-btn" id="clearAsrKeyBtn">清除</button>
+        </div>
+        <p class="asr-status" id="asrStatus">未启用 · 使用浏览器识别（准确度较低）</p>
+        <p class="asr-note">在 <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a> 创建 Key · Whisper 约 $0.006/分钟</p>
+      </details>
+
       <div class="card record-card disabled" id="recordCard">
         <div class="mic-granted-badge" id="micGrantedBadge" hidden>✓ 麦克风已就绪</div>
+        <span class="asr-badge" id="asrBadge" hidden>Whisper ASR</span>
         <div class="record-stage">
           <div class="record-visual" id="recordVisual">
             <div class="ripple-layer" aria-hidden="true">
@@ -221,6 +239,7 @@
   <script src="js/mood.js"></script>
   <script src="js/share-image.js"></script>
   <script src="js/ios.js"></script>
+  <script src="js/asr.js"></script>
   <script src="js/app.js"></script>
   <script>document.addEventListener("DOMContentLoaded", () => IOSApp.init());</script>
 </body>
