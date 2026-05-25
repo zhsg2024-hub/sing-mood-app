@@ -21,6 +21,8 @@
     recognizedText: "",
     isRecording: false,
     micGranted: false,
+    langMode: localStorage.getItem("sing_lang_mode") || "auto",
+    recognizers: [],
   };
 
   // --- DOM ---
@@ -492,6 +494,52 @@
   });
   checkMicPermission();
 
+  // --- 识曲语言 ---
+  function getRecognitionLangs() {
+    if (state.langMode === "zh") return ["zh-CN"];
+    if (state.langMode === "en") return ["en-US"];
+    return ["zh-CN", "en-US"];
+  }
+
+  function initLangSwitch() {
+    document.querySelectorAll(".lang-pill").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.lang === state.langMode);
+      btn.addEventListener("click", () => {
+        state.langMode = btn.dataset.lang;
+        localStorage.setItem("sing_lang_mode", state.langMode);
+        document.querySelectorAll(".lang-pill").forEach((b) => {
+          b.classList.toggle("active", b.dataset.lang === state.langMode);
+        });
+        const hint = state.langMode === "en"
+          ? "English mode · hold to sing or speak lyrics"
+          : state.langMode === "zh"
+            ? HINT_READY
+            : HINT_READY;
+        if (state.micGranted) recordHint.textContent = hint;
+        showToast(state.langMode === "en" ? "已切换 English 识曲" : state.langMode === "zh" ? "已切换中文识曲" : "已切换自动识曲（中英双语）");
+      });
+    });
+  }
+  initLangSwitch();
+
+  function startSpeechRecognition() {
+    stopSpeechRecognition();
+    state.recognizedText = "";
+    const langs = getRecognitionLangs();
+    state.recognizers = langs.map((lang) => createSpeechRecognition(lang)).filter(Boolean);
+    state.recognizers.forEach((rec) => {
+      try { rec.start(); } catch (_) {}
+    });
+  }
+
+  function stopSpeechRecognition() {
+    state.recognizers.forEach((rec) => {
+      try { rec.stop(); } catch (_) {}
+    });
+    state.recognizers = [];
+    state.recognition = null;
+  }
+
   // --- 录音 ---
   let isStarting = false;
 
@@ -538,10 +586,7 @@
       RecordFX.showRecording(stream);
       recordStatus.textContent = "";
 
-      state.recognition = createSpeechRecognition();
-      if (state.recognition) {
-        try { state.recognition.start(); } catch (_) {}
-      }
+      startSpeechRecognition();
     } catch (err) {
       isStarting = false;
       RecordFX.hide();
@@ -574,10 +619,7 @@
     RecordFX.hide();
     recordHint.textContent = HINT_READY;
 
-    if (state.recognition) {
-      try { state.recognition.stop(); } catch (_) {}
-      state.recognition = null;
-    }
+    stopSpeechRecognition();
 
     if (state.mediaRecorder?.state !== "inactive") {
       recordStatus.textContent = "识别中，请稍候…";
@@ -585,12 +627,12 @@
     }
   }
 
-  function createSpeechRecognition() {
+  function createSpeechRecognition(lang = "zh-CN") {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return null;
 
     const rec = new SR();
-    rec.lang = "zh-CN";
+    rec.lang = lang;
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 3;
@@ -603,17 +645,18 @@
         if (event.results[i].isFinal) final += t;
         else interim += t;
       }
-      if (final) state.recognizedText += final;
-      const display = state.recognizedText + interim;
-      if (display) recordStatus.textContent = `识别中：${display.slice(-30)}`;
+      if (final) state.recognizedText += (state.recognizedText ? " " : "") + final.trim();
+      const display = state.recognizedText + (interim ? " " + interim : "");
+      if (display.trim()) recordStatus.textContent = `识别中：${display.trim().slice(-36)}`;
     };
 
     rec.onerror = (e) => {
       if (e.error !== "no-speech" && e.error !== "aborted") {
-        console.warn("Speech error:", e.error);
+        console.warn("Speech error:", lang, e.error);
       }
     };
 
+    if (!state.recognition) state.recognition = rec;
     return rec;
   }
 
@@ -659,7 +702,7 @@
       } else if (match) {
         state.matchResult = match;
       } else {
-        showToast("暂未匹配到歌曲，试试念出歌词或哼更长一段");
+        showToast("暂未匹配到歌曲，试试切换 English 或念出英文歌词");
         recordStatus.textContent = "未匹配 · 可重试";
         return;
       }

@@ -85,13 +85,21 @@
       <div class="card text-search-card" id="textSearchCard" hidden>
         <h3 class="section-title">文字识曲</h3>
         <p class="text-search-desc">输入你记得的歌词或歌名，我们帮你找歌</p>
-        <input type="text" class="text-search-input" id="textSearchInput" placeholder="例如：故事的小黄花 / 晴天" maxlength="80" />
+        <input type="text" class="text-search-input" id="textSearchInput" placeholder="中文：故事的小黄花 / 英文：shape of you" maxlength="80" />
         <button type="button" class="primary-btn" id="textSearchBtn">🔍 查找歌曲</button>
         <button type="button" class="secondary-btn" id="textSearchBackBtn">← 返回麦克风授权</button>
       </div>
 
       <div class="card record-card disabled" id="recordCard">
         <div class="mic-granted-badge" id="micGrantedBadge" hidden>✓ 麦克风已就绪</div>
+        <div class="lang-switch" id="langSwitch">
+          <span class="lang-label">识曲语言</span>
+          <div class="lang-pills">
+            <button type="button" class="lang-pill active" data-lang="auto">自动</button>
+            <button type="button" class="lang-pill" data-lang="zh">中文</button>
+            <button type="button" class="lang-pill" data-lang="en">English</button>
+          </div>
+        </div>
         <div class="record-stage">
           <div class="record-visual" id="recordVisual">
             <div class="ripple-layer" aria-hidden="true">
@@ -118,6 +126,7 @@
       <div class="tips card">
         <h3>💡 小提示</h3>
         <ul>
+          <li>外文歌请选 <strong>English</strong> 或 <strong>自动</strong>，再念英文歌词</li>
           <li>跑调没关系，哼旋律或念歌词都可以</li>
           <li>念错字也行，我们会模糊匹配</li>
           <li>因版权原因，暂不提供原曲播放，仅显示歌词跟唱</li>

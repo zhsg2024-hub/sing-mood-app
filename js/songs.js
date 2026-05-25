@@ -7,6 +7,7 @@ const SONG_DATABASE = [
     id: "1",
     title: "晴天",
     artist: "周杰伦",
+    lang: "zh",
     bpm: 69,
     keywords: ["晴天", "故事", "下雨天", "刮风", "教室", "花落", "铅笔", "画"],
     lrc: `[00:00.00]晴天 - 周杰伦
@@ -32,6 +33,7 @@ const SONG_DATABASE = [
     id: "2",
     title: "稻香",
     artist: "周杰伦",
+    lang: "zh",
     bpm: 82,
     keywords: ["稻香", "回家", "乡", "河流", "童年", "纸飞机", "微笑", "梦想"],
     lrc: `[00:00.00]稻香 - 周杰伦
@@ -53,6 +55,7 @@ const SONG_DATABASE = [
     id: "3",
     title: "后来",
     artist: "刘若英",
+    lang: "zh",
     bpm: 72,
     keywords: ["后来", "爱", "错过", "栀子花", "白裙", "十七", "眼泪", "夏天"],
     lrc: `[00:00.00]后来 - 刘若英
@@ -76,6 +79,7 @@ const SONG_DATABASE = [
     id: "4",
     title: "平凡之路",
     artist: "朴树",
+    lang: "zh",
     bpm: 74,
     keywords: ["平凡", "之路", "徘徊", "跨过山", "人海", "曾经", "失落", "失望"],
     lrc: `[00:00.00]平凡之路 - 朴树
@@ -98,6 +102,7 @@ const SONG_DATABASE = [
     id: "5",
     title: "小幸运",
     artist: "田馥甄",
+    lang: "zh",
     bpm: 85,
     keywords: ["小幸运", "青春", "相遇", "下雨", "伞", "微笑", "原来", "你"],
     lrc: `[00:00.00]小幸运 - 田馥甄
@@ -118,6 +123,7 @@ const SONG_DATABASE = [
     id: "6",
     title: "成都",
     artist: "赵雷",
+    lang: "zh",
     bpm: 65,
     keywords: ["成都", "玉林", "小酒馆", "结尾", "分别", "走到", "街头"],
     lrc: `[00:00.00]成都 - 赵雷
@@ -136,6 +142,168 @@ const SONG_DATABASE = [
 [01:00.00]在那座阴雨的小城里
 [01:04.00]我从未忘记你
 [01:08.00]成都 带不走的 只有你`,
+  },
+  {
+    id: "7",
+    title: "Shape of You",
+    artist: "Ed Sheeran",
+    lang: "en",
+    bpm: 96,
+    keywords: ["shape", "you", "club", "body", "magnet", "van", "man"],
+    lrc: `[00:00.00]Shape of You - Ed Sheeran
+[00:08.00]The club isn't the best place to find a lover
+[00:12.00]So the bar is where I go
+[00:16.00]Me and my friends at the table doing shots
+[00:20.00]Drinking fast and then we talk slow
+[00:28.00]Come over and start up a conversation with just me
+[00:32.00]And trust me I'll give it a chance now
+[00:36.00]Take my hand stop put Van the Man on the jukebox
+[00:40.00]And then we start to dance
+[00:48.00]I'm in love with the shape of you
+[00:52.00]We push and pull like a magnet do
+[00:56.00]Although my heart is falling too
+[01:00.00]I'm in love with your body`,
+  },
+  {
+    id: "8",
+    title: "Someone Like You",
+    artist: "Adele",
+    lang: "en",
+    bpm: 67,
+    keywords: ["someone", "like", "you", "adele", "hello", "never", "mind", "found"],
+    lrc: `[00:00.00]Someone Like You - Adele
+[00:10.00]I heard that you're settled down
+[00:14.00]That you found a girl and you're married now
+[00:18.00]I heard that your dreams came true
+[00:22.00]Guess she gave you things I didn't give to you
+[00:30.00]Old friend why are you so shy
+[00:34.00]Ain't like you to hold back or hide from the light
+[00:42.00]I hate to turn up out of the blue uninvited
+[00:46.00]But I couldn't stay away I couldn't fight it
+[00:54.00]Never mind I'll find someone like you
+[00:62.00]I wish nothing but the best for you too
+[00:70.00]Don't forget me I beg I remember you said
+[00:78.00]Sometimes it lasts in love but sometimes it hurts instead`,
+  },
+  {
+    id: "9",
+    title: "Let It Go",
+    artist: "Idina Menzel",
+    lang: "en",
+    bpm: 137,
+    keywords: ["let", "go", "frozen", "snow", "queen", "cold", "free", "storm"],
+    lrc: `[00:00.00]Let It Go - Idina Menzel
+[00:08.00]The snow glows white on the mountain tonight
+[00:12.00]Not a footprint to be seen
+[00:16.00]A kingdom of isolation
+[00:20.00]And it looks like I'm the queen
+[00:28.00]The wind is howling like this swirling storm inside
+[00:36.00]Couldn't keep it in heaven knows I tried
+[00:44.00]Don't let them in don't let them see
+[00:48.00]Be the good girl you always have to be
+[00:56.00]Let it go let it go
+[01:00.00]Can't hold it back anymore
+[01:04.00]Let it go let it go
+[01:08.00]Turn away and slam the door`,
+  },
+  {
+    id: "10",
+    title: "Love Story",
+    artist: "Taylor Swift",
+    lang: "en",
+    bpm: 119,
+    keywords: ["love", "story", "taylor", "romeo", "juliet", "balcony", "baby"],
+    lrc: `[00:00.00]Love Story - Taylor Swift
+[00:08.00]We were both young when I first saw you
+[00:12.00]I close my eyes and the flashback starts
+[00:16.00]I'm standing there on a balcony in summer air
+[00:24.00]See the lights see the party the ball gowns
+[00:28.00]See you make your way through the crowd
+[00:32.00]And say hello little did I know
+[00:40.00]That you were Romeo you were throwing pebbles
+[00:44.00]And my daddy said stay away from Juliet
+[00:52.00]And I was crying on the staircase
+[00:56.00]Begging you please don't go
+[01:00.00]And I said Romeo take me somewhere we can be alone
+[01:08.00]I'll be waiting all that's left to do is run
+[01:16.00]You'll be the prince and I'll be the princess
+[01:20.00]It's a love story baby just say yes`,
+  },
+  {
+    id: "11",
+    title: "See You Again",
+    artist: "Wiz Khalifa",
+    lang: "en",
+    bpm: 80,
+    keywords: ["see", "again", "friend", "road", "fast", "furious", "charlie", "long"],
+    lrc: `[00:00.00]See You Again - Wiz Khalifa
+[00:10.00]It's been a long day without you my friend
+[00:14.00]And I'll tell you all about it when I see you again
+[00:22.00]We've come a long way from where we began
+[00:26.00]Oh I'll tell you all about it when I see you again
+[00:34.00]When I see you again
+[00:42.00]Damn who knew all the planes we flew
+[00:46.00]Good things we've been through
+[00:50.00]That I'd be standing right here talking to you
+[00:54.00]Bout another path I know we loved to hit the road and laugh
+[01:02.00]But something told me that it wouldn't last
+[01:06.00]Had to switch up look at things different see the bigger picture`,
+  },
+  {
+    id: "12",
+    title: "Yellow",
+    artist: "Coldplay",
+    lang: "en",
+    bpm: 87,
+    keywords: ["yellow", "coldplay", "stars", "look", "love", "you", "skin", "bones"],
+    lrc: `[00:00.00]Yellow - Coldplay
+[00:08.00]Look at the stars look how they shine for you
+[00:16.00]And everything you do yeah they were all yellow
+[00:24.00]I came along I wrote a song for you
+[00:32.00]And all the things you do and it was called yellow
+[00:40.00]So then I took my turn oh what a thing to have done
+[00:48.00]And it was all yellow
+[00:56.00]Your skin oh yeah your skin and bones
+[01:00.00]Turn into something beautiful
+[01:04.00]And you know you know I love you so
+[01:08.00]You know I love you so`,
+  },
+  {
+    id: "13",
+    title: "My Heart Will Go On",
+    artist: "Celine Dion",
+    lang: "en",
+    bpm: 97,
+    keywords: ["heart", "go", "on", "titanic", "near", "far", "wherever", "love"],
+    lrc: `[00:00.00]My Heart Will Go On - Celine Dion
+[00:08.00]Every night in my dreams I see you I feel you
+[00:16.00]That is how I know you go on
+[00:24.00]Far across the distance and spaces between us
+[00:32.00]You have come to show you go on
+[00:40.00]Near far wherever you are
+[00:44.00]I believe that the heart does go on
+[00:52.00]Once more you open the door
+[00:56.00]And you're here in my heart
+[01:00.00]And my heart will go on and on`,
+  },
+  {
+    id: "14",
+    title: "Perfect",
+    artist: "Ed Sheeran",
+    lang: "en",
+    bpm: 95,
+    keywords: ["perfect", "dancing", "barefoot", "grass", "baby", "beautiful", "darling"],
+    lrc: `[00:00.00]Perfect - Ed Sheeran
+[00:08.00]I found a love for me
+[00:12.00]Darling just dive right in and follow my lead
+[00:20.00]Well I found a girl beautiful and sweet
+[00:28.00]Oh I never knew you were the someone waiting for me
+[00:36.00]Cause we were just kids when we fell in love
+[00:40.00]Not knowing what it was
+[00:48.00]Baby I'm dancing in the dark with you between my arms
+[00:56.00]Barefoot on the grass listening to our favorite song
+[01:04.00]When you said you looked a mess I whispered underneath my breath
+[01:08.00]But you heard it darling you look perfect tonight`,
   },
 ];
 
