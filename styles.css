@@ -258,6 +258,50 @@ body {
   margin-bottom: 6px;
 }
 
+.asr-security-warn {
+  margin: 12px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 71, 87, 0.1);
+  border: 1px solid rgba(255, 71, 87, 0.35);
+  text-align: left;
+  font-size: 0.8rem;
+  color: #ffb8c0;
+  line-height: 1.65;
+}
+
+.asr-security-warn strong {
+  color: #ff6b81;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.asr-security-warn ul {
+  padding-left: 1.2em;
+  margin: 0;
+}
+
+.asr-security-warn li {
+  margin-bottom: 4px;
+}
+
+.asr-confirm-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 12px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.asr-confirm-label input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
 .asr-key-input {
   width: 100%;
   padding: 12px 14px;

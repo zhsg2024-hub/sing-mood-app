@@ -109,10 +109,23 @@
         <summary>⚙️ 语音识别 ASR（提高歌词识别准确率）</summary>
         <p class="asr-desc">
           浏览器自带识别对唱歌很不准。接入 <strong>OpenAI Whisper</strong> 后可大幅提升。
-          密钥仅保存在本机，不会上传到我们服务器。
         </p>
+        <div class="asr-security-warn" role="alert">
+          <strong>⚠️ API Key 安全提示（请务必阅读）</strong>
+          <ul>
+            <li>本应用是<strong>纯网页</strong>，Key 保存在 iPad 本地，但调用时会从<strong>浏览器直接发往 OpenAI</strong></li>
+            <li>懂技术的人可通过开发者工具、恶意脚本等方式<strong>读取 Key</strong></li>
+            <li><strong>切勿</strong>把 Key 写进代码并上传到 GitHub，或分享给他人使用同一 Key</li>
+            <li>仅建议<strong>个人测试</strong>；请在 OpenAI 后台设置<strong>用量上限</strong>，用完可随时删除 Key</li>
+            <li>正式对外发布应使用<strong>后端代理</strong>（Key 放服务器，不暴露给用户）</li>
+          </ul>
+        </div>
         <label for="openaiKeyInput">OpenAI API Key</label>
-        <input type="password" class="asr-key-input" id="openaiKeyInput" placeholder="sk-..." autocomplete="off" />
+        <input type="password" class="asr-key-input" id="openaiKeyInput" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+        <label class="asr-confirm-label">
+          <input type="checkbox" id="asrRiskAck" />
+          我已了解 Key 存在泄露风险，仅个人使用，并已设置 OpenAI 用量限制
+        </label>
         <div class="btn-row">
           <button type="button" class="primary-btn" id="saveAsrKeyBtn">保存并启用</button>
           <button type="button" class="secondary-btn" id="clearAsrKeyBtn">清除</button>

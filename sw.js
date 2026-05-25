@@ -1,4 +1,4 @@
-const CACHE = "sing-mood-v4";
+const CACHE = "sing-mood-v5";
 const ASSETS = [
   "./index.html",
   "./styles.css",

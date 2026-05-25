@@ -76,13 +76,30 @@ npx serve .
 
 ## 可选 API 扩展
 
-在 `js/app.js` 中配置：
+### ⚠️ API Key 安全（重要）
+
+本应用是 **GitHub Pages 静态网页**，没有后端。若在页面里填写 OpenAI Key：
+
+- Key 存在 **iPad 本地 localStorage**
+- 请求时 Key 从 **浏览器直接** 发给 OpenAI（网络面板可见）
+- **存在泄露风险**：他人使用你的设备、恶意脚本、误截图等
+
+**请务必：**
+
+1. **不要** 把 Key 写进 `app.js` 或提交到 GitHub
+2. 仅在 ASR 设置里 **个人填写**，并勾选风险确认
+3. 在 [OpenAI 用量限制](https://platform.openai.com/settings/organization/limits) 设置 **每月上限**
+4. 不用时点 **「清除」** 删除本机 Key
+5. 正式对外产品应改用 **后端代理**（Cloudflare Workers 等），Key 不放前端
+
+### 配置项
 
 ```javascript
+// 仅本地调试可写在 app.js，切勿 push 到公开仓库
 window.APP_CONFIG = {
-  openaiKey: "sk-...",   // OpenAI：更智能的分享文案
-  auddToken: "...",      // AudD.io：专业哼唱/识曲
+  auddToken: "...",      // AudD 同样有前端泄露风险
 };
+// OpenAI Key 请用页面「ASR 设置」填写，不要写进代码
 ```
 
 ## 技术栈

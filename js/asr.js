@@ -31,7 +31,7 @@ const ASR = (() => {
     return new File([blob], name.endsWith(ext) ? name : `recording.${ext}`, { type });
   }
 
-  /** OpenAI Whisper 语音转文字 */
+  /** OpenAI Whisper 语音转文字 — Key 从浏览器发出，存在泄露风险，见页面安全提示 */
   async function transcribeOpenAI(blob, langMode = "auto") {
     const { openaiKey, model } = getConfig();
     if (!openaiKey) throw new Error("未配置 OpenAI API Key");

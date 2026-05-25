@@ -4,8 +4,9 @@
 (() => {
   // 全局配置（可选接入第三方 API）
   window.APP_CONFIG = {
-    // openaiKey: "sk-...",        // 或在页面 ASR 设置里填写（存本机）
-    // auddToken: "...",           // 可选：AudD 识曲 API
+    // ⚠️ 切勿把 openaiKey 写在这里并上传到 GitHub（会泄露）
+    // openaiKey 请仅在页面「ASR 设置」中填写（存本机，仍有前端泄露风险）
+    // auddToken: "...",           // 可选：AudD 识曲（同样有泄露风险）
     // whisperModel: "whisper-1",
   };
 
@@ -578,6 +579,10 @@
     }
 
     document.getElementById("saveAsrKeyBtn")?.addEventListener("click", () => {
+      if (!document.getElementById("asrRiskAck")?.checked) {
+        showToast("请先勾选「已了解 Key 泄露风险」");
+        return;
+      }
       const raw = document.getElementById("openaiKeyInput")?.value?.trim();
       if (!raw) {
         showToast("请输入 OpenAI API Key");
@@ -589,8 +594,10 @@
       }
       localStorage.setItem("sing_openai_key", raw);
       window.APP_CONFIG.openaiKey = raw;
+      const inp = document.getElementById("openaiKeyInput");
+      if (inp) { inp.value = ""; inp.placeholder = "已保存 · 输入新 Key 可覆盖"; }
       updateAsrUI();
-      showToast("Whisper ASR 已启用");
+      showToast("Whisper ASR 已启用 · 请勿分享设备或截图含 Key 的页面");
     });
 
     document.getElementById("clearAsrKeyBtn")?.addEventListener("click", () => {
