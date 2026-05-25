@@ -1,0 +1,155 @@
+/* iPhone / iPad 专用样式 */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body.ios {
+  min-height: 100dvh;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+body.ios .app {
+  max-width: 100%;
+  padding-top: calc(12px + var(--safe-top));
+}
+
+body.ipad .app {
+  max-width: 680px;
+}
+
+body.ipad .record-visual {
+  width: 240px;
+  height: 240px;
+}
+
+body.ipad .record-btn {
+  inset: 42px;
+  font-size: 2.6rem;
+}
+
+body.ipad .lyrics-line.active .ktv-char {
+  font-size: 1.5rem;
+}
+
+body.standalone .header {
+  padding-top: calc(8px + var(--safe-top));
+}
+
+body.standalone .toast {
+  bottom: calc(40px + var(--safe-bottom));
+}
+
+/* 添加到主屏幕引导 */
+.ios-install-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.2), rgba(232, 67, 147, 0.15));
+  border: 1px solid rgba(108, 92, 231, 0.35);
+}
+
+.ios-install-banner[hidden] {
+  display: none !important;
+}
+
+.ios-install-banner h3 {
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ios-install-banner p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.ios-install-steps {
+  list-style: none;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.75;
+}
+
+.ios-install-steps li {
+  padding-left: 1.4em;
+  position: relative;
+}
+
+.ios-install-steps li::before {
+  content: attr(data-step);
+  position: absolute;
+  left: 0;
+  color: var(--accent2);
+  font-weight: 700;
+}
+
+.ios-install-banner .btn-row {
+  margin-top: 4px;
+}
+
+/* 电脑无麦克风 → 推荐用手机 */
+.mobile-recommend {
+  border-color: rgba(0, 206, 201, 0.35);
+  background: linear-gradient(160deg, rgba(0, 206, 201, 0.1) 0%, var(--bg-card) 55%);
+  text-align: center;
+}
+
+.mobile-recommend h3 {
+  font-size: 1.05rem;
+  margin-bottom: 8px;
+}
+
+.mobile-recommend p {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+
+.mobile-recommend code {
+  display: block;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 0.82rem;
+  word-break: break-all;
+  color: var(--highlight);
+}
+
+.mobile-recommend[hidden] {
+  display: none !important;
+}
+
+/* iOS 大按钮触控区 */
+body.ios .record-btn,
+body.ios .play-btn,
+body.ios .primary-btn,
+body.ios .share-trigger-btn {
+  min-height: 48px;
+}
+
+body.ios .record-btn {
+  min-width: 88px;
+  min-height: 88px;
+}
+
+/* 横屏 iPad */
+@media (orientation: landscape) and (min-height: 500px) {
+  body.ipad .lyrics-container {
+    max-height: 42vh;
+  }
+}

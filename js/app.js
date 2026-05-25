@@ -1,0 +1,859 @@
+/**
+ * 哼歌助手 - 主应用逻辑
+ */
+(() => {
+  // 全局配置（可选接入第三方 API）
+  window.APP_CONFIG = {
+    // openaiKey: "sk-...",        // 可选：AI 文案
+    // auddToken: "...",           // 可选：AudD 识曲 API
+  };
+
+  // --- 状态 ---
+  const state = {
+    currentSong: null,
+    matchResult: null,
+    karaoke: null,
+    selectedStyle: "watercolor",
+    mediaRecorder: null,
+    audioChunks: [],
+    audioBlob: null,
+    recognition: null,
+    recognizedText: "",
+    isRecording: false,
+    micGranted: false,
+  };
+
+  // --- DOM ---
+  const $ = (sel) => document.querySelector(sel);
+  const screens = {
+    home: $("#screen-home"),
+    sing: $("#screen-sing"),
+    share: $("#screen-share"),
+  };
+
+  const recordBtn = $("#recordBtn");
+  const recordCard = $("#recordCard");
+  const recordVisual = $("#recordVisual");
+  const recordHint = $("#recordHint");
+  const recordStatus = $("#recordStatus");
+  const recordLive = $("#recordLive");
+  const recTimer = $("#recTimer");
+  const waveformBars = $("#waveformBars");
+  const recordRingCanvas = $("#recordRingCanvas");
+  const micPermissionCard = $("#micPermissionCard");
+  const requestMicBtn = $("#requestMicBtn");
+  const micPermStatus = $("#micPermStatus");
+  const micPermTitle = $("#micPermTitle");
+  const micPermDesc = $("#micPermDesc");
+  const micPermHelp = $("#micPermHelp");
+  const micPermHelpSummary = $("#micPermHelpSummary");
+  const micPermHelpList = $("#micPermHelpList");
+  const textFallbackBtn = $("#textFallbackBtn");
+  const textSearchCard = $("#textSearchCard");
+  const textSearchInput = $("#textSearchInput");
+  const textSearchBtn = $("#textSearchBtn");
+  const textSearchBackBtn = $("#textSearchBackBtn");
+  const micGrantedBadge = $("#micGrantedBadge");
+  const loadingOverlay = $("#loadingOverlay");
+  const loadingText = $("#loadingText");
+  const toast = $("#toast");
+
+  const BAR_COUNT = 28;
+  const RING_BAR_COUNT = 48;
+
+  // --- 录音视觉反馈 ---
+  const RecordFX = (() => {
+    let audioCtx = null;
+    let analyser = null;
+    let source = null;
+    let rafId = null;
+    let timerId = null;
+    let recordStartMs = 0;
+    let barEls = [];
+
+    function initBars() {
+      if (barEls.length) return;
+      waveformBars.innerHTML = "";
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const bar = document.createElement("span");
+        bar.className = "bar";
+        bar.style.height = "10px";
+        waveformBars.appendChild(bar);
+        barEls.push(bar);
+      }
+    }
+
+    function formatRecTime(ms) {
+      const sec = Math.floor(ms / 1000);
+      return `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, "0")}`;
+    }
+
+    function startTimer() {
+      recordStartMs = Date.now();
+      recTimer.textContent = "0:00";
+      timerId = setInterval(() => {
+        recTimer.textContent = formatRecTime(Date.now() - recordStartMs);
+      }, 200);
+    }
+
+    function stopTimer() {
+      clearInterval(timerId);
+      timerId = null;
+    }
+
+    function drawRing(level) {
+      const canvas = recordRingCanvas;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const baseR = 78;
+      const amp = 8 + level * 28;
+
+      ctx.clearRect(0, 0, w, h);
+
+      for (let i = 0; i < RING_BAR_COUNT; i++) {
+        const t = i / RING_BAR_COUNT;
+        const angle = t * Math.PI * 2 - Math.PI / 2;
+        const wave = 0.65 + 0.35 * Math.sin(t * Math.PI * 6 + performance.now() / 180);
+        const r2 = baseR + amp * wave;
+        const x1 = cx + Math.cos(angle) * baseR;
+        const y1 = cy + Math.sin(angle) * baseR;
+        const x2 = cx + Math.cos(angle) * r2;
+        const y2 = cy + Math.sin(angle) * r2;
+
+        const g = ctx.createLinearGradient(x1, y1, x2, y2);
+        g.addColorStop(0, "rgba(108, 92, 231, 0.15)");
+        g.addColorStop(1, `rgba(232, 67, 147, ${0.35 + level * 0.5})`);
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+
+    function tickIdleRing() {
+      drawRing(0.35 + 0.15 * Math.sin(performance.now() / 300));
+      rafId = requestAnimationFrame(tickIdleRing);
+    }
+
+    function tickLive(dataArray) {
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const level = sum / dataArray.length / 255;
+
+      barEls.forEach((bar, i) => {
+        const idx = Math.floor((i / BAR_COUNT) * dataArray.length);
+        const v = dataArray[idx] / 255;
+        const h = 8 + v * 44;
+        bar.style.height = `${h}px`;
+        bar.style.opacity = String(0.45 + v * 0.55);
+      });
+
+      drawRing(level);
+      rafId = requestAnimationFrame(() => {
+        analyser.getByteFrequencyData(dataArray);
+        tickLive(dataArray);
+      });
+    }
+
+    function showPressing() {
+      initBars();
+      recordCard.classList.add("pressing");
+      recordVisual.classList.add("pressing");
+      recordLive.hidden = false;
+      waveformBars.hidden = false;
+      recordHint.textContent = "松手结束录音…";
+      recTimer.textContent = "0:00";
+      if (rafId) cancelAnimationFrame(rafId);
+      drawRing(0.25);
+      rafId = requestAnimationFrame(tickIdleRing);
+      if (navigator.vibrate) navigator.vibrate(15);
+    }
+
+    function showRecording(stream) {
+      recordCard.classList.remove("pressing");
+      recordCard.classList.add("recording");
+      recordVisual.classList.remove("pressing");
+      recordVisual.classList.add("recording");
+      recordHint.textContent = "正在听，哼唱或念歌词…";
+      startTimer();
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.75;
+      source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      if (rafId) cancelAnimationFrame(rafId);
+      analyser.getByteFrequencyData(dataArray);
+      tickLive(dataArray);
+    }
+
+    function hide() {
+      recordCard.classList.remove("pressing", "recording");
+      recordVisual.classList.remove("pressing", "recording");
+      recordLive.hidden = true;
+      waveformBars.hidden = true;
+      stopTimer();
+
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+
+      if (source) {
+        try { source.disconnect(); } catch (_) {}
+        source = null;
+      }
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+        audioCtx = null;
+      }
+      analyser = null;
+
+      barEls.forEach((bar) => {
+        bar.style.height = "10px";
+        bar.style.opacity = "";
+      });
+
+      const ctx = recordRingCanvas?.getContext("2d");
+      ctx?.clearRect(0, 0, recordRingCanvas.width, recordRingCanvas.height);
+    }
+
+    return { showPressing, showRecording, hide };
+  })();
+
+  // --- 工具 ---
+  let toastTimer;
+  function showToast(msg, duration = 2500) {
+    toast.textContent = msg;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, duration);
+  }
+
+  function showScreen(name) {
+    Object.values(screens).forEach((s) => s.classList.remove("active"));
+    screens[name]?.classList.add("active");
+  }
+
+  function showLoading(text = "正在识别…") {
+    loadingText.textContent = text;
+    loadingOverlay.hidden = false;
+  }
+
+  function hideLoading() {
+    loadingOverlay.hidden = true;
+  }
+
+  // --- 屏幕导航 ---
+  document.querySelectorAll("[data-back]").forEach((btn) => {
+    btn.addEventListener("click", () => showScreen(btn.dataset.back));
+  });
+
+  const HINT_READY = "按住按钮，哼唱或念出一段歌词";
+  const HINT_NEED_MIC = "请先授权麦克风，再按住按钮哼唱";
+
+  const HELP_DENIED = `
+    <li><strong>Chrome / Edge：</strong>地址栏左侧 🔒 → 网站设置 → 麦克风 → 允许</li>
+    <li><strong>Safari（iPhone）：</strong>设置 → Safari → 麦克风 → 允许</li>
+    <li><strong>微信内置浏览器：</strong>建议复制链接到系统浏览器打开</li>`;
+
+  const HELP_NOT_FOUND = `
+    <li><strong>Windows：</strong>设置 → 隐私和安全性 → 麦克风 → 开启「麦克风访问」</li>
+    <li><strong>检查硬件：</strong>插入耳机/麦克风，或确认笔记本内置麦克风未被禁用</li>
+    <li><strong>远程桌面 / 虚拟机：</strong>可能无法使用本机麦克风，请换用手机或实体机</li>
+    <li><strong>仍无法使用：</strong>可点击下方「改用文字输入」直接搜歌词</li>`;
+
+  function setHelpContent(type) {
+    micPermHelpSummary.textContent = type === "notfound"
+      ? "未检测到麦克风？点击查看解决方法"
+      : "权限被拒绝？点击查看设置方法";
+    micPermHelpList.innerHTML = type === "notfound" ? HELP_NOT_FOUND : HELP_DENIED;
+  }
+
+  function showTextSearchMode(show) {
+    textSearchCard.hidden = !show;
+    micPermissionCard.hidden = show;
+    recordCard.style.display = show ? "none" : "";
+    if (show) textSearchInput.focus();
+  }
+
+  function setRecordEnabled(enabled) {
+    state.micGranted = enabled;
+    recordCard.classList.toggle("disabled", !enabled);
+    micGrantedBadge.hidden = !enabled;
+    recordHint.textContent = enabled ? HINT_READY : HINT_NEED_MIC;
+  }
+
+  function updateMicUI(status) {
+    micPermissionCard.classList.remove("granted", "denied", "prompt", "notfound");
+    micPermStatus.classList.remove("error");
+    micPermHelp.hidden = true;
+    textFallbackBtn.hidden = true;
+    micPermissionCard.hidden = false;
+
+    if (status === "granted") {
+      micPermissionCard.classList.add("granted");
+      setRecordEnabled(true);
+      return;
+    }
+
+    setRecordEnabled(false);
+    micPermissionCard.classList.remove("granted");
+
+    if (status === "denied") {
+      micPermissionCard.classList.add("denied");
+      micPermTitle.textContent = "麦克风权限被拒绝";
+      micPermDesc.textContent = "请在浏览器设置中允许本网站使用麦克风，然后点击下方按钮重试。";
+      requestMicBtn.textContent = "重新申请麦克风";
+      requestMicBtn.hidden = false;
+      micPermStatus.textContent = "当前无法录音";
+      micPermStatus.classList.add("error");
+      setHelpContent("denied");
+      micPermHelp.hidden = false;
+    } else if (status === "notfound") {
+      micPermissionCard.classList.add("notfound");
+      micPermTitle.textContent = "未检测到麦克风";
+      micPermDesc.textContent = "系统找不到可用的录音设备。请检查麦克风是否已连接并在系统设置中启用。";
+      requestMicBtn.textContent = "重新检测麦克风";
+      requestMicBtn.hidden = false;
+      textFallbackBtn.hidden = false;
+      micPermStatus.textContent = "未找到录音设备";
+      micPermStatus.classList.add("error");
+      setHelpContent("notfound");
+      micPermHelp.hidden = false;
+    } else if (status === "unsupported") {
+      micPermTitle.textContent = "浏览器不支持录音";
+      micPermDesc.textContent = "请使用 Chrome、Edge 或 Safari，并通过 http://localhost 或 HTTPS 访问本页面。";
+      requestMicBtn.hidden = true;
+      textFallbackBtn.hidden = false;
+      micPermStatus.textContent = "不支持 getUserMedia";
+      micPermStatus.classList.add("error");
+    } else {
+      micPermissionCard.classList.add("prompt");
+      micPermTitle.textContent = "需要麦克风权限";
+      micPermDesc.innerHTML = "哼歌识曲需要访问麦克风，用于聆听你哼唱的旋律或歌词。<br />音频仅在本地识别，不会上传保存。";
+      requestMicBtn.textContent = "允许使用麦克风";
+      requestMicBtn.hidden = false;
+      textFallbackBtn.hidden = false;
+      micPermStatus.textContent = "";
+      setHelpContent("denied");
+    }
+  }
+
+  async function listAudioInputs() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter((d) => d.kind === "audioinput" && d.deviceId);
+    } catch {
+      return [];
+    }
+  }
+
+  async function acquireMicStream() {
+    const attempts = [
+      () => navigator.mediaDevices.getUserMedia({ audio: true }),
+      () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } }),
+    ];
+
+    let lastError;
+    for (const tryGet of attempts) {
+      try {
+        return await tryGet();
+      } catch (err) {
+        lastError = err;
+        if (err.name !== "NotFoundError" && err.name !== "OverconstrainedError") throw err;
+      }
+    }
+
+    const inputs = await listAudioInputs();
+    for (const dev of inputs) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: dev.deviceId } },
+        });
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    const err = lastError || new DOMException("未找到麦克风设备", "NotFoundError");
+    throw err;
+  }
+
+  function mapMicError(err) {
+    if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") return "denied";
+    if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") return "notfound";
+    if (String(err.message || "").toLowerCase().includes("not found")) return "notfound";
+    return "prompt";
+  }
+
+  function micErrorMessage(err, status) {
+    if (status === "denied") return "您拒绝了麦克风权限";
+    if (status === "notfound") return "未检测到麦克风，请检查设备与系统设置";
+    return `授权失败：${err.message || "请重试"}`;
+  }
+
+  async function checkMicPermission() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      updateMicUI("unsupported");
+      return;
+    }
+
+    if (IOSApp.isIOS && !IOSApp.isSecure) {
+      micPermTitle.textContent = "需要 HTTPS 安全连接";
+      micPermDesc.innerHTML = "iPhone / iPad 的麦克风只能在 <strong>HTTPS</strong> 或 localhost 下使用。<br />请用 ngrok 或部署到 GitHub Pages 后，再用 Safari 打开。";
+      textFallbackBtn.hidden = false;
+      micPermStatus.textContent = "当前不是安全连接，无法使用麦克风";
+      micPermStatus.classList.add("error");
+      setHelpContent("denied");
+      micPermHelp.hidden = false;
+      setRecordEnabled(false);
+      return;
+    }
+
+    if (navigator.permissions?.query) {
+      try {
+        const result = await navigator.permissions.query({ name: "microphone" });
+        updateMicUI(result.state);
+        result.onchange = () => updateMicUI(result.state);
+        return;
+      } catch (_) {
+        /* Safari 等浏览器可能不支持 microphone 查询 */
+      }
+    }
+
+    updateMicUI("prompt");
+  }
+
+  async function requestMicPermission() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      updateMicUI("unsupported");
+      showToast("当前浏览器不支持麦克风");
+      return false;
+    }
+
+    requestMicBtn.disabled = true;
+    micPermStatus.classList.remove("error");
+    micPermStatus.textContent = "等待授权…";
+
+    try {
+      const stream = await acquireMicStream();
+      stream.getTracks().forEach((t) => t.stop());
+      updateMicUI("granted");
+      micPermStatus.textContent = "✓ 授权成功，可以开始哼歌了";
+      showToast("麦克风已就绪");
+      return true;
+    } catch (err) {
+      const status = mapMicError(err);
+      updateMicUI(status);
+      micPermStatus.textContent = micErrorMessage(err, status);
+      micPermStatus.classList.add("error");
+      if (status === "denied" || status === "notfound") micPermHelp.hidden = false;
+      showToast(status === "denied" ? "请在浏览器中允许麦克风" : status === "notfound" ? "未检测到麦克风" : "麦克风授权失败");
+      console.error(err);
+      return false;
+    } finally {
+      requestMicBtn.disabled = false;
+    }
+  }
+
+  requestMicBtn.addEventListener("click", requestMicPermission);
+  textFallbackBtn.addEventListener("click", () => showTextSearchMode(true));
+  textSearchBackBtn.addEventListener("click", () => showTextSearchMode(false));
+  textSearchBtn.addEventListener("click", () => {
+    const text = textSearchInput.value.trim();
+    if (!text) {
+      showToast("请输入歌词或歌名");
+      return;
+    }
+    showLoading("正在匹配歌曲…");
+    SongMatcher.matchByText(text).then((match) => {
+      hideLoading();
+      if (match) {
+        state.matchResult = match;
+        openSingScreen(match);
+      } else {
+        showToast("暂未匹配到歌曲，换个关键词试试");
+      }
+    });
+  });
+  textSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") textSearchBtn.click();
+  });
+  checkMicPermission();
+
+  // --- 录音 ---
+  let isStarting = false;
+
+  async function startRecording() {
+    if (state.isRecording || isStarting) return;
+
+    if (!state.micGranted) {
+      micPermissionCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      micPermissionCard.style.animation = "none";
+      void micPermissionCard.offsetWidth;
+      micPermissionCard.style.animation = "fadeIn 0.35s ease, permShake 0.4s ease";
+      showToast("请先允许使用麦克风");
+      await requestMicPermission();
+      if (!state.micGranted) return;
+    }
+
+    isStarting = true;
+    RecordFX.showPressing();
+
+    try {
+      const stream = await acquireMicStream();
+      state.audioChunks = [];
+      state.recognizedText = "";
+      state.audioBlob = null;
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/mp4";
+      state.mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+      state.mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) state.audioChunks.push(e.data);
+      };
+
+      state.mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        state.audioBlob = new Blob(state.audioChunks, { type: mimeType });
+        await processRecording();
+      };
+
+      state.mediaRecorder.start(200);
+      state.isRecording = true;
+      isStarting = false;
+      RecordFX.showRecording(stream);
+      recordStatus.textContent = "";
+
+      state.recognition = createSpeechRecognition();
+      if (state.recognition) {
+        try { state.recognition.start(); } catch (_) {}
+      }
+    } catch (err) {
+      isStarting = false;
+      RecordFX.hide();
+      recordHint.textContent = state.micGranted ? HINT_READY : HINT_NEED_MIC;
+      const status = mapMicError(err);
+      if (status === "notfound") updateMicUI("notfound");
+      else if (status === "denied") updateMicUI("denied");
+      showToast(status === "notfound" ? "未检测到麦克风，可改用文字输入" : "无法访问麦克风，请检查权限");
+      console.error(err);
+    }
+  }
+
+  function stopRecording() {
+    if (!state.isRecording && !isStarting) {
+      RecordFX.hide();
+      return;
+    }
+
+    if (isStarting && !state.isRecording) {
+      isStarting = false;
+      RecordFX.hide();
+      recordHint.textContent = HINT_READY;
+      return;
+    }
+
+    if (!state.isRecording) return;
+
+    state.isRecording = false;
+    isStarting = false;
+    RecordFX.hide();
+    recordHint.textContent = HINT_READY;
+
+    if (state.recognition) {
+      try { state.recognition.stop(); } catch (_) {}
+      state.recognition = null;
+    }
+
+    if (state.mediaRecorder?.state !== "inactive") {
+      recordStatus.textContent = "识别中，请稍候…";
+      state.mediaRecorder.stop();
+    }
+  }
+
+  function createSpeechRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+
+    const rec = new SR();
+    rec.lang = "zh-CN";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 3;
+
+    rec.onresult = (event) => {
+      let final = "";
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) final += t;
+        else interim += t;
+      }
+      if (final) state.recognizedText += final;
+      const display = state.recognizedText + interim;
+      if (display) recordStatus.textContent = `识别中：${display.slice(-30)}`;
+    };
+
+    rec.onerror = (e) => {
+      if (e.error !== "no-speech" && e.error !== "aborted") {
+        console.warn("Speech error:", e.error);
+      }
+    };
+
+    return rec;
+  }
+
+  // 按住录音交互
+  recordBtn.addEventListener("mousedown", startRecording);
+  recordBtn.addEventListener("mouseup", stopRecording);
+  recordBtn.addEventListener("mouseleave", stopRecording);
+  recordBtn.addEventListener("touchstart", (e) => { e.preventDefault(); startRecording(); }, { passive: false });
+  recordBtn.addEventListener("touchend", (e) => { e.preventDefault(); stopRecording(); });
+  recordBtn.addEventListener("touchcancel", (e) => { e.preventDefault(); stopRecording(); });
+
+  // --- 识曲处理 ---
+  async function processRecording() {
+    if (!state.audioBlob || state.audioBlob.size < 1000) {
+      showToast("录音太短，请再试一次（至少 2 秒）");
+      return;
+    }
+
+    showLoading("正在匹配歌曲…");
+
+    try {
+      // 可选：AudD API 识曲
+      let auddResult = null;
+      if (window.APP_CONFIG.auddToken) {
+        auddResult = await tryAuddRecognition(state.audioBlob);
+      }
+
+      const match = await SongMatcher.match(state.recognizedText, state.audioBlob);
+
+      hideLoading();
+
+      if (auddResult) {
+        // 若 API 返回结果，尝试与本地库合并
+        const localMatch = SONG_DATABASE.find(
+          (s) => s.title.includes(auddResult.title) || auddResult.title.includes(s.title)
+        );
+        if (localMatch) {
+          state.matchResult = { song: localMatch, confidence: 95, method: "api" };
+        } else {
+          showToast(`识别到：${auddResult.title} - ${auddResult.artist}（暂无歌词）`);
+          return;
+        }
+      } else if (match) {
+        state.matchResult = match;
+      } else {
+        showToast("暂未匹配到歌曲，试试念出歌词或哼更长一段");
+        recordStatus.textContent = "未匹配 · 可重试";
+        return;
+      }
+
+      openSingScreen(state.matchResult);
+    } catch (err) {
+      hideLoading();
+      showToast("识别出错，请重试");
+      console.error(err);
+    }
+  }
+
+  async function tryAuddRecognition(blob) {
+    const form = new FormData();
+    form.append("api_token", window.APP_CONFIG.auddToken);
+    form.append("return", "apple_music,spotify");
+    form.append("file", blob, "recording.webm");
+
+    const res = await fetch("https://api.audd.io/", { method: "POST", body: form });
+    const data = await res.json();
+    if (data.result) {
+      return { title: data.result.title, artist: data.result.artist };
+    }
+    return null;
+  }
+
+  // --- 跟唱界面 ---
+  function openSingScreen(matchResult) {
+    const { song, confidence } = matchResult;
+    state.currentSong = song;
+    const bpm = song.bpm || 72;
+
+    $("#songTitle").textContent = song.title;
+    $("#songArtist").textContent = song.artist;
+    $("#matchBadge").textContent = `匹配度 ${confidence}% · ${matchResult.method === "api" ? "在线识别" : "智能匹配"}`;
+    $("#bpmLabel").textContent = `${bpm} BPM`;
+
+    const lines = LyricsEngine.parseLrc(song.lrc);
+    const container = $("#lyricsScroll");
+    state.karaoke = new LyricsEngine.KaraokePlayer(container, lines, { bpm });
+
+    state.beatBar = LyricsEngine.initBeatBar($("#beatBar"));
+    state.karaoke.onBeat = (beatInBar) => {
+      state.beatBar.pulse(beatInBar);
+      const panel = document.querySelector(".beat-panel");
+      panel?.classList.remove("pulsing");
+      void panel?.offsetWidth;
+      panel?.classList.add("pulsing");
+    };
+
+    const progressFill = $("#progressFill");
+    const timeDisplay = $("#timeDisplay");
+    const playBtn = $("#singPlayBtn");
+
+    state.karaoke.onTimeUpdate = (current, total) => {
+      progressFill.style.width = `${(current / total) * 100}%`;
+      timeDisplay.textContent = `${LyricsEngine.formatTime(current)} / ${LyricsEngine.formatTime(total)}`;
+    };
+
+    state.karaoke.onEnd = () => {
+      playBtn.textContent = "▶ 重新开始";
+      playBtn.classList.remove("playing");
+      state.beatBar?.reset();
+    };
+
+    playBtn.textContent = "▶ 开始跟唱";
+    playBtn.classList.remove("playing");
+    progressFill.style.width = "0%";
+    timeDisplay.textContent = "0:00 / " + LyricsEngine.formatTime(state.karaoke.duration);
+
+    showScreen("sing");
+    showToast(`找到了！《${song.title}》`);
+  }
+
+  const singPlayBtn = $("#singPlayBtn");
+  singPlayBtn.addEventListener("click", () => {
+    if (!state.karaoke) return;
+    if (state.karaoke.playing) {
+      state.karaoke.pause();
+      singPlayBtn.textContent = "▶ 继续跟唱";
+      singPlayBtn.classList.remove("playing");
+      state.beatBar?.reset();
+    } else {
+      if (state.karaoke.currentTime >= state.karaoke.duration - 0.5) {
+        state.karaoke.reset();
+      }
+      state.karaoke.play(state.karaoke.currentTime);
+      singPlayBtn.textContent = "⏸ 暂停";
+      singPlayBtn.classList.add("playing");
+    }
+  });
+
+  // --- 分享心情 ---
+  $("#goShareBtn").addEventListener("click", () => {
+    initShareScreen();
+    showScreen("share");
+  });
+
+  function initShareScreen() {
+    renderStyleGrid();
+    generateMoodText();
+  }
+
+  function getActiveLyricLine() {
+    if (!state.karaoke || state.karaoke.activeIndex < 0) return "";
+    return state.karaoke.lines[state.karaoke.activeIndex]?.text || "";
+  }
+
+  async function generateMoodText() {
+    if (!state.currentSong) return;
+    const textarea = $("#moodText");
+    textarea.value = "生成中…";
+
+    const activeLine = getActiveLyricLine();
+    const text = await MoodGenerator.generateWithAI(state.currentSong, activeLine);
+    textarea.value = text;
+  }
+
+  function renderStyleGrid() {
+    const grid = $("#styleGrid");
+    grid.innerHTML = ShareImage.STYLES.map(
+      (s) => `
+      <button type="button" class="style-option ${s.id === state.selectedStyle ? "selected" : ""}" data-style="${s.id}">
+        <span class="emoji">${s.emoji}</span>
+        ${s.name}
+      </button>`
+    ).join("");
+
+    grid.querySelectorAll(".style-option").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.selectedStyle = btn.dataset.style;
+        grid.querySelectorAll(".style-option").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+      });
+    });
+  }
+
+  $("#regenTextBtn").addEventListener("click", generateMoodText);
+
+  $("#copyTextBtn").addEventListener("click", async () => {
+    const text = $("#moodText").value;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("文案已复制，去微信粘贴吧");
+    } catch {
+      showToast("复制失败，请手动选择复制");
+    }
+  });
+
+  $("#genImageBtn").addEventListener("click", () => {
+    if (!state.currentSong) return;
+    const moodText = $("#moodText").value.trim();
+    if (!moodText) {
+      showToast("请先生成或输入文案");
+      return;
+    }
+
+    const canvas = $("#shareCanvas");
+    ShareImage.render(canvas, {
+      songTitle: state.currentSong.title,
+      songArtist: state.currentSong.artist,
+      moodText,
+      styleId: state.selectedStyle,
+    });
+
+    $("#previewCard").hidden = false;
+    showToast("分享图已生成");
+  });
+
+  $("#copyImageBtn").addEventListener("click", async () => {
+    const canvas = $("#shareCanvas");
+    const ok = await ShareImage.copyToClipboard(canvas);
+    if (ok) {
+      showToast("图片已复制！打开微信长按粘贴");
+    } else {
+      showToast("浏览器不支持复制图片，请用「保存到相册」");
+    }
+  });
+
+  $("#saveImageBtn").addEventListener("click", () => {
+    ShareImage.download($("#shareCanvas"), `哼歌心情-${state.currentSong?.title || "分享"}.png`);
+    showToast("图片已保存");
+  });
+
+  // --- 快捷演示（无麦克风时开发测试）---
+  if (location.search.includes("demo=1")) {
+    setRecordEnabled(true);
+    micPermissionCard.classList.add("granted");
+    setTimeout(() => {
+      state.recognizedText = "故事的小黄花";
+      state.audioBlob = new Blob([new ArrayBuffer(2000)]);
+      SongMatcher.match(state.recognizedText, state.audioBlob).then((m) => {
+        if (m) openSingScreen(m);
+      });
+    }, 500);
+  }
+})();
