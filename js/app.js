@@ -498,7 +498,8 @@
   function getRecognitionLangs() {
     if (state.langMode === "zh") return ["zh-CN"];
     if (state.langMode === "en") return ["en-US"];
-    return ["zh-CN", "en-US"];
+    if (state.langMode === "ja") return ["ja-JP"];
+    return ["zh-CN", "en-US", "ja-JP"];
   }
 
   function initLangSwitch() {
@@ -512,11 +513,17 @@
         });
         const hint = state.langMode === "en"
           ? "English mode · hold to sing or speak lyrics"
-          : state.langMode === "zh"
-            ? HINT_READY
+          : state.langMode === "ja"
+            ? "日本語モード · ボタンを押して歌う"
             : HINT_READY;
         if (state.micGranted) recordHint.textContent = hint;
-        showToast(state.langMode === "en" ? "已切换 English 识曲" : state.langMode === "zh" ? "已切换中文识曲" : "已切换自动识曲（中英双语）");
+        const toasts = {
+          en: "已切换 English 识曲",
+          zh: "已切换中文识曲",
+          ja: "已切换日本語识曲",
+          auto: "已切换自动识曲（中/英/日）",
+        };
+        showToast(toasts[state.langMode] || toasts.auto);
       });
     });
   }
@@ -702,7 +709,7 @@
       } else if (match) {
         state.matchResult = match;
       } else {
-        showToast("暂未匹配到歌曲，试试切换 English 或念出英文歌词");
+        showToast("暂未匹配到歌曲，试试切换语言或念出歌名/歌词");
         recordStatus.textContent = "未匹配 · 可重试";
         return;
       }

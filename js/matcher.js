@@ -1,6 +1,6 @@
 /**
  * 歌曲匹配引擎
- * 支持：中文 + 英文歌词/歌名模糊匹配
+ * 支持：中文 + 英文 + 日文歌词/歌名模糊匹配
  */
 const SongMatcher = (() => {
   function levenshtein(a, b) {
@@ -27,18 +27,28 @@ const SongMatcher = (() => {
 
   function isLatinDominant(text) {
     const latin = (text.match(/[a-zA-Z]/g) || []).length;
-    const cjk = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-    return latin > cjk;
+    const kana = (text.match(/[\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
+    const cjk = (text.match(/[\u4e00-\u9faf]/g) || []).length;
+    return latin > kana && latin > cjk;
   }
 
-  /** 中文：去空格；英文：保留单词边界 */
-  function normalizeText(text, preferLatin) {
-    const raw = text.toLowerCase().trim();
-    const latin = preferLatin ?? isLatinDominant(raw);
-    if (latin) {
-      return raw.replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
-    }
-    return raw.replace(/\s+/g, "");
+  function hasJapanese(text) {
+    return /[\u3040-\u309f\u30a0-\u30ff]/.test(text);
+  }
+
+  function normalizeEnglish(text) {
+    return text.toLowerCase().replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeCjk(text) {
+    return text.toLowerCase().replace(/[\s\u3000]/g, "");
+  }
+
+  function normalizeJapanese(text) {
+    return text
+      .toLowerCase()
+      .replace(/[\s\u3000]/g, "")
+      .replace(/[^\u3040-\u309f\u30a0-\u30ffa-z0-9\u4e00-\u9faf]/g, "");
   }
 
   function wordTokens(text) {
@@ -69,67 +79,129 @@ const SongMatcher = (() => {
       .filter((line) => line && !/^.+\s-\s.+$/.test(line));
   }
 
-  function cleanLine(line, isEn) {
-    if (isEn) return line.toLowerCase().replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
+  function cleanLine(line, lang) {
+    if (lang === "en") {
+      return line.toLowerCase().replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
+    }
+    if (lang === "ja") {
+      return line.replace(/[^\u3040-\u309f\u30a0-\u30ffa-zA-Z0-9\u4e00-\u9faf]/g, "");
+    }
     return line.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
   }
 
+  function matchKeywords(text, textEn, keywords, lang) {
+    let score = 0;
+    for (const kw of keywords || []) {
+      const kwEn = normalizeEnglish(kw);
+      const kwJa = normalizeJapanese(kw);
+      const kwZh = normalizeCjk(kw);
+
+      if (lang === "en") {
+        if (text.includes(kwEn.replace(/\s/g, "")) || wordOverlapScore(textEn, kwEn) > 0.5) {
+          score = Math.max(score, 0.55 + kwEn.length / 25);
+        }
+      } else if (lang === "ja") {
+        if (text.includes(kwJa) || kwJa.includes(text.slice(0, Math.min(4, text.length)))) {
+          score = Math.max(score, 0.5 + kwJa.length / 18);
+        }
+        if (kwEn && (textEn.includes(kwEn) || wordOverlapScore(textEn, kwEn) > 0.8)) {
+          score = Math.max(score, 0.65 + kwEn.length / 20);
+        }
+      } else if (text.includes(kwZh) || kwZh.includes(text.slice(0, Math.min(4, text.length)))) {
+        score = Math.max(score, 0.5 + kwZh.length / 20);
+      }
+    }
+    return score;
+  }
+
+  function scoreCjkLyrics(text, lines, lang = "zh") {
+    let score = 0;
+    for (const line of lines) {
+      const clean = typeof line === "string" && line.length < 80 && !line.includes("[")
+        ? line
+        : cleanLine(line, lang);
+      if (clean.length < 2) continue;
+      if (text.includes(clean) || clean.includes(text)) {
+        score = Math.max(score, 0.85);
+        continue;
+      }
+      for (let i = 0; i <= clean.length - 2; i++) {
+        const chunk = clean.slice(i, i + Math.min(text.length + 2, clean.length - i));
+        const sim = similarity(text, chunk);
+        if (sim > 0.55) score = Math.max(score, sim);
+      }
+      const lineSim = similarity(text, clean);
+      if (lineSim > 0.45) score = Math.max(score, lineSim);
+    }
+    return score;
+  }
+
   function scoreSong(textRaw, song) {
-    const isEn = song.lang === "en" || (song.lang !== "zh" && isLatinDominant(textRaw));
-    const text = normalizeText(textRaw, isEn);
-    if (!text) return 0;
+    const lang = song.lang || "zh";
+    const textEn = normalizeEnglish(textRaw);
+    const textEnCompact = textEn.replace(/\s/g, "");
+    const textJa = normalizeJapanese(textRaw);
+    const textZh = normalizeCjk(textRaw);
+
+    let text = textZh;
+    if (lang === "en") text = textEnCompact;
+    if (lang === "ja") text = textJa;
+
+    if (!text && !textEn) return 0;
 
     let score = 0;
-    const titleNorm = normalizeText(song.title, isEn);
-    const artistNorm = normalizeText(song.artist, isEn);
 
-    if (isEn) {
-      score = Math.max(score, wordOverlapScore(text, titleNorm) * 1.3);
-      score = Math.max(score, wordOverlapScore(text, artistNorm) * 0.7);
-      score = Math.max(score, similarity(text.replace(/\s/g, ""), titleNorm.replace(/\s/g, "")) * 1.1);
-    } else {
-      score = Math.max(score, similarity(text, titleNorm.replace(/\s/g, "")) * 1.2);
-      score = Math.max(score, similarity(text, artistNorm.replace(/\s/g, "")) * 0.6);
-    }
-
-    for (const kw of song.keywords || []) {
-      const kwNorm = normalizeText(kw, isEn);
-      if (isEn) {
-        if (text.includes(kwNorm) || wordOverlapScore(text, kwNorm) > 0.5) {
-          score = Math.max(score, 0.55 + kwNorm.length / 25);
-        }
-      } else if (text.includes(kwNorm) || kwNorm.includes(text.slice(0, Math.min(4, text.length)))) {
-        score = Math.max(score, 0.5 + kwNorm.length / 20);
+    if (lang === "en") {
+      score = Math.max(score, wordOverlapScore(textEn, normalizeEnglish(song.title)) * 1.3);
+      score = Math.max(score, wordOverlapScore(textEn, normalizeEnglish(song.artist)) * 0.7);
+      score = Math.max(score, similarity(textEnCompact, normalizeEnglish(song.title).replace(/\s/g, "")) * 1.1);
+    } else if (lang === "ja") {
+      const titleEn = normalizeEnglish(song.title);
+      const artistJa = normalizeJapanese(song.artist);
+      if (titleEn) {
+        score = Math.max(score, wordOverlapScore(textEn, titleEn) * 1.35);
+        score = Math.max(score, similarity(textEnCompact, titleEn.replace(/\s/g, "")) * 1.15);
       }
+      score = Math.max(score, similarity(textJa, normalizeJapanese(song.title)) * 1.2);
+      score = Math.max(score, similarity(textJa, artistJa) * 0.65);
+    } else {
+      score = Math.max(score, similarity(textZh, normalizeCjk(song.title)) * 1.2);
+      score = Math.max(score, similarity(textZh, normalizeCjk(song.artist)) * 0.6);
     }
+
+    score = Math.max(score, matchKeywords(text, textEn, song.keywords, lang));
 
     const lines = extractLyricLines(song.lrc);
-    for (const line of lines) {
-      const clean = cleanLine(line, isEn);
-      if (clean.length < 2) continue;
-
-      if (isEn) {
-        const overlap = wordOverlapScore(text, clean);
+    if (lang === "en") {
+      for (const line of lines) {
+        const clean = cleanLine(line, "en");
+        if (clean.length < 2) continue;
+        const overlap = wordOverlapScore(textEn, clean);
         if (overlap > 0.45) score = Math.max(score, 0.7 + overlap * 0.25);
-        if (text.includes(clean) || clean.includes(text)) score = Math.max(score, 0.88);
-        const lineSim = similarity(text.replace(/\s/g, ""), clean.replace(/\s/g, ""));
+        if (textEnCompact.includes(clean.replace(/\s/g, "")) || clean.includes(textEn)) score = Math.max(score, 0.88);
+        const lineSim = similarity(textEnCompact, clean.replace(/\s/g, ""));
         if (lineSim > 0.5) score = Math.max(score, lineSim);
-      } else {
-        if (text.includes(clean) || clean.includes(text)) {
-          score = Math.max(score, 0.85);
-          continue;
-        }
-        for (let i = 0; i <= clean.length - 2; i++) {
-          const chunk = clean.slice(i, i + Math.min(text.length + 2, clean.length - i));
-          const sim = similarity(text, chunk);
-          if (sim > 0.55) score = Math.max(score, sim);
-        }
-        const lineSim = similarity(text, clean);
-        if (lineSim > 0.45) score = Math.max(score, lineSim);
       }
+    } else if (lang === "ja") {
+      score = Math.max(score, scoreCjkLyrics(textJa, lines, "ja"));
+      for (const line of lines) {
+        const clean = cleanLine(line, "en");
+        if (clean.length >= 3 && textEnCompact) {
+          const overlap = wordOverlapScore(textEn, clean);
+          if (overlap > 0.5) score = Math.max(score, 0.75 + overlap * 0.2);
+        }
+      }
+    } else {
+      score = Math.max(score, scoreCjkLyrics(textZh, lines, "zh"));
     }
 
     return score;
+  }
+
+  function matchThreshold(text) {
+    if (isLatinDominant(text)) return 0.32;
+    if (hasJapanese(text)) return 0.33;
+    return 0.35;
   }
 
   function matchByText(recognizedText, songs = SONG_DATABASE) {
@@ -146,7 +218,7 @@ const SongMatcher = (() => {
       }
     }
 
-    const threshold = isLatinDominant(recognizedText) ? 0.32 : 0.35;
+    const threshold = matchThreshold(recognizedText);
     if (best && bestScore >= threshold) {
       best.confidence = Math.min(99, Math.round(bestScore * 100));
       return best;
@@ -200,5 +272,5 @@ const SongMatcher = (() => {
     return textResult;
   }
 
-  return { match, matchByText, similarity, isLatinDominant };
+  return { match, matchByText, similarity, isLatinDominant, hasJapanese };
 })();
