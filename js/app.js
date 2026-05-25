@@ -285,6 +285,7 @@
   function showTextSearchMode(show) {
     textSearchCard.hidden = !show;
     micPermissionCard.hidden = show;
+    document.getElementById("langCard").hidden = show;
     recordCard.style.display = show ? "none" : "";
     if (show) textSearchInput.focus();
   }
@@ -511,12 +512,20 @@
         document.querySelectorAll(".lang-pill").forEach((b) => {
           b.classList.toggle("active", b.dataset.lang === state.langMode);
         });
-        const hint = state.langMode === "en"
-          ? "English mode · hold to sing or speak lyrics"
-          : state.langMode === "ja"
-            ? "日本語モード · ボタンを押して歌う"
-            : HINT_READY;
-        if (state.micGranted) recordHint.textContent = hint;
+        const hints = {
+          en: "English mode · hold to sing or speak lyrics",
+          ja: "日本語モード · ボタンを押して歌う",
+        };
+        const langHints = {
+          auto: "自动模式：中 / 英 / 日 均可识别",
+          zh: "中文模式：哼中文歌或念中文歌词",
+          en: "English mode: speak English lyrics",
+          ja: "日本語：lemon や日本語歌詞を唱えて",
+        };
+        if (state.micGranted) recordHint.textContent = hints[state.langMode] || HINT_READY;
+        const langHintEl = document.getElementById("langHint");
+        if (langHintEl) langHintEl.textContent = langHints[state.langMode] || langHints.auto;
+        refreshLangHint();
         const toasts = {
           en: "已切换 English 识曲",
           zh: "已切换中文识曲",
@@ -528,6 +537,18 @@
     });
   }
   initLangSwitch();
+
+  function refreshLangHint() {
+    const langHints = {
+      auto: "自动模式：中 / 英 / 日 均可识别",
+      zh: "中文模式：哼中文歌或念中文歌词",
+      en: "English mode: speak English lyrics",
+      ja: "日本語：lemon や日本語歌詞を唱えて",
+    };
+    const el = document.getElementById("langHint");
+    if (el) el.textContent = langHints[state.langMode] || langHints.auto;
+  }
+  refreshLangHint();
 
   function startSpeechRecognition() {
     stopSpeechRecognition();

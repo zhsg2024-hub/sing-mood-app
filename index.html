@@ -90,17 +90,22 @@
         <button type="button" class="secondary-btn" id="textSearchBackBtn">← 返回麦克风授权</button>
       </div>
 
-      <div class="card record-card disabled" id="recordCard">
-        <div class="mic-granted-badge" id="micGrantedBadge" hidden>✓ 麦克风已就绪</div>
+      <!-- 识曲语言（独立卡片，授权前也可切换） -->
+      <div class="card lang-card" id="langCard">
         <div class="lang-switch" id="langSwitch">
-          <span class="lang-label">识曲语言</span>
+          <span class="lang-label">🌐 识曲语言</span>
           <div class="lang-pills">
             <button type="button" class="lang-pill active" data-lang="auto">自动</button>
             <button type="button" class="lang-pill" data-lang="zh">中文</button>
             <button type="button" class="lang-pill" data-lang="en">English</button>
             <button type="button" class="lang-pill" data-lang="ja">日本語</button>
           </div>
+          <p class="lang-hint" id="langHint">自动模式：中 / 英 / 日 均可识别</p>
         </div>
+      </div>
+
+      <div class="card record-card disabled" id="recordCard">
+        <div class="mic-granted-badge" id="micGrantedBadge" hidden>✓ 麦克风已就绪</div>
         <div class="record-stage">
           <div class="record-visual" id="recordVisual">
             <div class="ripple-layer" aria-hidden="true">

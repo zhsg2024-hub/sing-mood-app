@@ -99,9 +99,26 @@ body {
 }
 
 .record-card.disabled {
-  opacity: 0.45;
+  opacity: 0.55;
+}
+
+.record-card.disabled .record-btn {
   pointer-events: none;
-  user-select: none;
+}
+
+.lang-card {
+  padding: 16px 18px;
+  border-color: rgba(108, 92, 231, 0.3);
+}
+
+.lang-switch {
+  text-align: center;
+}
+
+.lang-hint {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .mic-permission {
@@ -238,7 +255,7 @@ body {
 }
 
 .lang-switch {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .lang-label {
