@@ -272,5 +272,53 @@ const SongMatcher = (() => {
     return textResult;
   }
 
-  return { match, matchByText, similarity, isLatinDominant, hasJapanese };
+  function resolveGuess(guess, recognizedText = "") {
+    if (!guess?.title?.trim()) return null;
+
+    const title = guess.title.trim();
+    const artist = (guess.artist || "").trim();
+    const confidence = Math.min(99, Math.round(Number(guess.confidence) || 75));
+
+    let song = null;
+    let inLibrary = false;
+    for (const s of SONG_DATABASE) {
+      const titleHit =
+        s.title === title ||
+        s.title.includes(title) ||
+        title.includes(s.title) ||
+        similarity(normalizeCjk(title), normalizeCjk(s.title)) >= 0.55;
+      const artistHit =
+        !artist ||
+        s.artist.includes(artist) ||
+        artist.includes(s.artist) ||
+        similarity(normalizeCjk(artist), normalizeCjk(s.artist)) >= 0.5;
+      if (titleHit && artistHit) {
+        song = s;
+        inLibrary = true;
+        break;
+      }
+    }
+
+    if (!song) {
+      song = {
+        id: `llm-${Date.now()}`,
+        title,
+        artist: artist || "未知歌手",
+        lang: "zh",
+        bpm: 72,
+        keywords: [],
+        lrc: `[00:00.00]${title}${artist ? ` - ${artist}` : ""}\n[00:08.00]${recognizedText.slice(0, 80) || title}`,
+      };
+    }
+
+    return {
+      song,
+      confidence,
+      method: "llm",
+      inLibrary,
+      reason: guess.reason || "",
+    };
+  }
+
+  return { match, matchByText, resolveGuess, similarity, isLatinDominant, hasJapanese };
 })();

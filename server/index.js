@@ -182,6 +182,37 @@ async function transcribeWithOpenAI(buffer, mimetype, langMode) {
   };
 }
 
+function parseJsonFromContent(content) {
+  const text = (content || "").trim();
+  const block = text.match(/```json?\s*([\s\S]*?)```/i);
+  const raw = block ? block[1].trim() : text;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error("AI 返回格式无效");
+  }
+}
+
+async function chatComplete(messages, maxTokens = 200) {
+  const res = await fetch(`${BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: apiHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      model: CHAT_MODEL,
+      messages,
+      max_tokens: maxTokens,
+      temperature: 0.3,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error?.message || data.message || "大模型调用失败");
+  }
+  return data.choices?.[0]?.message?.content?.trim() || "";
+}
+
 app.get("/", (_req, res) => {
   res.json({
     name: "哼歌助手服务端",
@@ -228,6 +259,51 @@ app.post(
     }
   }
 );
+
+app.post("/api/song/guess", requireClientAuth, requireApiKey, async (req, res) => {
+  try {
+    const { text, langMode = "auto" } = req.body || {};
+    if (!text?.trim()) return res.status(400).json({ error: "缺少 text" });
+
+    const langHint =
+      langMode === "en"
+        ? "可能是英文歌"
+        : langMode === "ja"
+          ? "可能是日文歌"
+          : langMode === "zh"
+            ? "可能是中文歌"
+            : "可能是中文、英文或日文歌";
+
+    const content = await chatComplete([
+      {
+        role: "system",
+        content:
+          "你是音乐识曲专家。用户哼唱或念出的文字可能是歌词片段、歌名或语音识别误差。请推测最可能的歌曲。只输出 JSON，不要 markdown，不要解释。格式：{\"title\":\"歌名\",\"artist\":\"歌手\",\"confidence\":0-100,\"reason\":\"简短理由\",\"alternatives\":[{\"title\":\"\",\"artist\":\"\"}]}",
+      },
+      {
+        role: "user",
+        content: `${langHint}。用户输入：\n${text.trim()}`,
+      },
+    ]);
+
+    const parsed = parseJsonFromContent(content);
+    if (!parsed?.title) {
+      return res.status(422).json({ error: "AI 未能识别歌曲" });
+    }
+
+    res.json({
+      title: String(parsed.title).trim(),
+      artist: String(parsed.artist || "").trim(),
+      confidence: Math.min(99, Math.max(0, Number(parsed.confidence) || 70)),
+      reason: String(parsed.reason || "").trim(),
+      alternatives: Array.isArray(parsed.alternatives) ? parsed.alternatives.slice(0, 3) : [],
+      provider: PROVIDER,
+    });
+  } catch (err) {
+    console.error("Guess error:", err);
+    res.status(500).json({ error: err.message || "猜歌失败" });
+  }
+});
 
 app.post("/api/mood/generate", requireClientAuth, requireApiKey, async (req, res) => {
   try {

@@ -35,6 +35,19 @@ const ApiClient = (() => {
     return data;
   }
 
+  async function guessSong(text, langMode = "auto") {
+    const base = getBaseUrl();
+    if (!base) throw new Error("未配置服务器地址");
+    const res = await fetch(`${base}/api/song/guess`, {
+      method: "POST",
+      headers: buildHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ text, langMode }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `AI 猜歌失败 (${res.status})`);
+    return data;
+  }
+
   function saveConfig(baseUrl, apiSecret = "") {
     const url = baseUrl.trim().replace(/\/$/, "");
     localStorage.setItem(LS_BASE, url);
@@ -67,6 +80,7 @@ const ApiClient = (() => {
     isConfigured,
     buildHeaders,
     health,
+    guessSong,
     saveConfig,
     clearConfig,
     migrateLegacyKeys,
