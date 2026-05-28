@@ -58,41 +58,27 @@ const MoodGenerator = (() => {
   }
 
   /**
-   * 可选：对接 OpenAI 等 API
-   * 设置 window.APP_CONFIG.openaiKey 即可启用
+   * 优先服务端生成文案（Key 在服务器）
    */
   async function generateWithAI(song, activeLine) {
-    const key = window.APP_CONFIG?.openaiKey;
-    if (!key) return generate(song, activeLine ? `唱到了「${activeLine}」` : "");
-
-    try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "你是文艺朋友圈文案助手。用简短、有感染力的中文写一段分享哼歌心情的文案，80字以内，适合发微信。不要标题，不要 hashtag。",
-            },
-            {
-              role: "user",
-              content: `歌曲：《${song.title}》${song.artist}${activeLine ? `，刚唱到「${activeLine}」` : ""}`,
-            },
-          ],
-          max_tokens: 150,
-        }),
-      });
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content?.trim() || generate(song);
-    } catch {
-      return generate(song);
+    if (ApiClient.isConfigured()) {
+      try {
+        const res = await fetch(`${ApiClient.getBaseUrl()}/api/mood/generate`, {
+          method: "POST",
+          headers: ApiClient.buildHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            title: song.title,
+            artist: song.artist,
+            activeLine: activeLine || "",
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.text) return data.text;
+      } catch (_) {
+        /* 回退本地模板 */
+      }
     }
+    return generate(song, activeLine ? `唱到了「${activeLine}」` : "");
   }
 
   return { generate, generateFromLyrics, generateWithAI };

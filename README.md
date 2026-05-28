@@ -25,7 +25,30 @@
 
 详细步骤见 **[IOS.md](./IOS.md)**。
 
-## 快速启动
+## 客户端 / 服务端模式（推荐）
+
+| 角色 | 部署 | 职责 |
+|------|------|------|
+| **客户端** | GitHub Pages 静态页 | 录音、界面、本地曲库匹配 |
+| **服务端** | Render / Railway / 自建 | Whisper ASR、AI 文案（Key 在 `.env`） |
+
+1. 部署 `server/` 到云平台（见 **[SERVER.md](./SERVER.md)**）
+2. 在 iPad 打开网页 → **连接服务器** → 填入地址并测试
+3. OpenAI Key **只写在服务器**，不再出现在浏览器
+
+本地联调：
+
+```bash
+# 终端 1：后端
+cd sing-mood-app/server && npm install && npm start
+
+# 终端 2：前端
+cd sing-mood-app && python -m http.server 8080
+```
+
+客户端填 `http://localhost:3000`（本机调试；iPad 需用 ngrok 等 HTTPS 隧道）。
+
+## 快速启动（仅前端）
 
 ### 方式一：直接打开（功能受限）
 
@@ -76,31 +99,16 @@ npx serve .
 
 ## 可选 API 扩展
 
-### ⚠️ API Key 安全（重要）
+### 识曲（AudD）
 
-本应用是 **GitHub Pages 静态网页**，没有后端。若在页面里填写 OpenAI Key：
+在线识曲 API 同样建议 **放服务端**，不要在前端写 Token。当前默认使用 **本地曲库 + 语音识别**。
 
-- Key 存在 **iPad 本地 localStorage**
-- 请求时 Key 从 **浏览器直接** 发给 OpenAI（网络面板可见）
-- **存在泄露风险**：他人使用你的设备、恶意脚本、误截图等
+### 安全说明
 
-**请务必：**
-
-1. **不要** 把 Key 写进 `app.js` 或提交到 GitHub
-2. 仅在 ASR 设置里 **个人填写**，并勾选风险确认
-3. 在 [OpenAI 用量限制](https://platform.openai.com/settings/organization/limits) 设置 **每月上限**
-4. 不用时点 **「清除」** 删除本机 Key
-5. 正式对外产品应改用 **后端代理**（Cloudflare Workers 等），Key 不放前端
-
-### 配置项
-
-```javascript
-// 仅本地调试可写在 app.js，切勿 push 到公开仓库
-window.APP_CONFIG = {
-  auddToken: "...",      // AudD 同样有前端泄露风险
-};
-// OpenAI Key 请用页面「ASR 设置」填写，不要写进代码
-```
+- ✅ OpenAI Key → 服务端 `.env`（见 SERVER.md）
+- ✅ 可选 `API_SECRET` 防止滥用
+- ✅ `ALLOWED_ORIGINS` 限制 CORS
+- ❌ 不要把 Key / Token 写进 `app.js` 或提交 GitHub
 
 ## 技术栈
 
@@ -117,8 +125,14 @@ sing-mood-app/
 ├── index.html
 ├── styles.css
 ├── README.md
+├── SERVER.md           # 服务端部署说明
+├── server/             # Node 后端（ASR / 文案）
+│   ├── index.js
+│   └── package.json
 └── js/
     ├── app.js          # 主逻辑
+    ├── api-client.js   # 服务器连接
+    ├── asr.js          # 服务端 ASR 调用
     ├── songs.js        # 歌曲库
     ├── matcher.js      # 模糊匹配
     ├── lyrics.js       # KTV 歌词引擎

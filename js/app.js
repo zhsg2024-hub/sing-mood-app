@@ -4,17 +4,12 @@
 (() => {
   // 全局配置（可选接入第三方 API）
   window.APP_CONFIG = {
-    // ⚠️ 切勿把 openaiKey 写在这里并上传到 GitHub（会泄露）
-    // openaiKey 请仅在页面「ASR 设置」中填写（存本机，仍有前端泄露风险）
-    // auddToken: "...",           // 可选：AudD 识曲（同样有泄露风险）
-    // whisperModel: "whisper-1",
+    // apiBaseUrl: "https://your-server.onrender.com",
+    // apiSecret: "与服务器 API_SECRET 一致（可选）",
+    // auddToken: "...",  // 若接入 AudD，建议也放服务端
   };
 
-  // 从本机恢复 ASR Key
-  (function loadStoredAsrKey() {
-    const k = localStorage.getItem("sing_openai_key");
-    if (k) window.APP_CONFIG.openaiKey = k;
-  })();
+  ApiClient.migrateLegacyKeys();
 
   // --- 状态 ---
   const state = {
@@ -558,60 +553,70 @@
   }
   refreshLangHint();
 
-  // --- ASR 设置 ---
-  function updateAsrUI() {
+  // --- 服务器连接 ---
+  function updateServerUI() {
     const statusEl = document.getElementById("asrStatus");
     const badge = document.getElementById("asrBadge");
-    const on = ASR.isEnabled();
+    const on = ApiClient.isConfigured();
     if (statusEl) {
       statusEl.textContent = on
-        ? "✓ Whisper ASR 已启用 · 录音后将用 AI 转写歌词"
-        : "未启用 · 使用浏览器识别（准确度较低）";
+        ? `✓ 已连接 ${ApiClient.getBaseUrl()} · 松手后服务端 ASR 识别`
+        : "未连接服务器 · 使用浏览器识别（准确度较低）";
       statusEl.classList.toggle("on", on);
     }
     if (badge) badge.hidden = !on;
+    const urlInput = document.getElementById("serverUrlInput");
+    if (urlInput && on && !urlInput.value) urlInput.value = ApiClient.getBaseUrl();
   }
 
-  function initAsrSettings() {
-    const input = document.getElementById("openaiKeyInput");
-    if (input && ASR.isEnabled()) {
-      input.placeholder = "已保存 Key · 输入新 Key 可覆盖";
-    }
+  function initServerSettings() {
+    const savedUrl = localStorage.getItem("sing_api_base");
+    const urlInput = document.getElementById("serverUrlInput");
+    if (urlInput && savedUrl) urlInput.value = savedUrl;
 
-    document.getElementById("saveAsrKeyBtn")?.addEventListener("click", () => {
-      if (!document.getElementById("asrRiskAck")?.checked) {
-        showToast("请先勾选「已了解 Key 泄露风险」");
+    document.getElementById("saveServerBtn")?.addEventListener("click", async () => {
+      const url = document.getElementById("serverUrlInput")?.value?.trim();
+      const secret = document.getElementById("serverSecretInput")?.value?.trim() || "";
+      if (!url) {
+        showToast("请输入服务器地址");
         return;
       }
-      const raw = document.getElementById("openaiKeyInput")?.value?.trim();
-      if (!raw) {
-        showToast("请输入 OpenAI API Key");
+      if (!/^https?:\/\//i.test(url)) {
+        showToast("地址需以 http:// 或 https:// 开头");
         return;
       }
-      if (!raw.startsWith("sk-")) {
-        showToast("Key 格式应为 sk- 开头");
-        return;
+      ApiClient.saveConfig(url, secret);
+      showLoading("正在连接服务器…");
+      try {
+        const health = await ApiClient.health();
+        hideLoading();
+        if (!health.asr) {
+          showToast("服务器已连接，但未配置 OPENAI_API_KEY");
+        } else {
+          showToast("服务器连接成功 · ASR 已就绪");
+        }
+        updateServerUI();
+      } catch (err) {
+        hideLoading();
+        ApiClient.clearConfig();
+        updateServerUI();
+        showToast(`连接失败：${err.message}`);
       }
-      localStorage.setItem("sing_openai_key", raw);
-      window.APP_CONFIG.openaiKey = raw;
-      const inp = document.getElementById("openaiKeyInput");
-      if (inp) { inp.value = ""; inp.placeholder = "已保存 · 输入新 Key 可覆盖"; }
-      updateAsrUI();
-      showToast("Whisper ASR 已启用 · 请勿分享设备或截图含 Key 的页面");
     });
 
-    document.getElementById("clearAsrKeyBtn")?.addEventListener("click", () => {
-      localStorage.removeItem("sing_openai_key");
-      delete window.APP_CONFIG.openaiKey;
-      const inp = document.getElementById("openaiKeyInput");
-      if (inp) inp.value = "";
-      updateAsrUI();
-      showToast("已清除 ASR 密钥");
+    document.getElementById("clearServerBtn")?.addEventListener("click", () => {
+      ApiClient.clearConfig();
+      const u = document.getElementById("serverUrlInput");
+      const s = document.getElementById("serverSecretInput");
+      if (u) u.value = "";
+      if (s) s.value = "";
+      updateServerUI();
+      showToast("已清除服务器配置");
     });
 
-    updateAsrUI();
+    updateServerUI();
   }
-  initAsrSettings();
+  initServerSettings();
 
   function startSpeechRecognition() {
     stopSpeechRecognition();
@@ -777,7 +782,7 @@
 
     try {
       if (ASR.isEnabled()) {
-        showLoading("Whisper 正在识别歌词…");
+        showLoading("服务端 ASR 识别歌词…");
         try {
           const asr = await ASR.transcribe(state.audioBlob, { langMode: state.langMode });
           if (asr?.text) {
@@ -863,7 +868,7 @@
 
     $("#songTitle").textContent = song.title;
     $("#songArtist").textContent = song.artist;
-    const methodLabels = { api: "在线识曲", asr: "Whisper ASR", text: "智能匹配" };
+    const methodLabels = { api: "在线识曲", asr: "服务端 ASR", text: "智能匹配" };
     $("#matchBadge").textContent = `匹配度 ${confidence}% · ${methodLabels[matchResult.method] || "智能匹配"}`;
     $("#bpmLabel").textContent = `${bpm} BPM`;
 

@@ -104,39 +104,36 @@
         </div>
       </div>
 
-      <!-- ASR 设置（OpenAI Whisper） -->
-      <details class="card asr-settings" id="asrSettings">
-        <summary>⚙️ 语音识别 ASR（提高歌词识别准确率）</summary>
+      <!-- 服务器连接（ASR 走服务端，Key 不暴露） -->
+      <details class="card asr-settings" id="serverSettings">
+        <summary>⚙️ 连接服务器（客户端 / 服务端模式）</summary>
         <p class="asr-desc">
-          浏览器自带识别对唱歌很不准。接入 <strong>OpenAI Whisper</strong> 后可大幅提升。
+          前端（iPad 网页）只负责录音和界面；<strong>Whisper ASR</strong> 在你的服务器上运行，
+          <strong>OpenAI Key 只存在服务器</strong>，不会出现在浏览器里。
         </p>
-        <div class="asr-security-warn" role="alert">
-          <strong>⚠️ API Key 安全提示（请务必阅读）</strong>
+        <div class="asr-security-warn asr-security-ok" role="alert">
+          <strong>✓ 安全架构说明</strong>
           <ul>
-            <li>本应用是<strong>纯网页</strong>，Key 保存在 iPad 本地，但调用时会从<strong>浏览器直接发往 OpenAI</strong></li>
-            <li>懂技术的人可通过开发者工具、恶意脚本等方式<strong>读取 Key</strong></li>
-            <li><strong>切勿</strong>把 Key 写进代码并上传到 GitHub，或分享给他人使用同一 Key</li>
-            <li>仅建议<strong>个人测试</strong>；请在 OpenAI 后台设置<strong>用量上限</strong>，用完可随时删除 Key</li>
-            <li>正式对外发布应使用<strong>后端代理</strong>（Key 放服务器，不暴露给用户）</li>
+            <li>客户端：GitHub Pages 静态页 · 只保存<strong>服务器地址</strong></li>
+            <li>服务端：<code>server/</code> 部署到 Render/Railway 等 · Key 写在服务器 <code>.env</code></li>
+            <li>可选 <strong>连接密钥</strong>（API_SECRET）防止他人滥用你的服务器</li>
           </ul>
         </div>
-        <label for="openaiKeyInput">OpenAI API Key</label>
-        <input type="password" class="asr-key-input" id="openaiKeyInput" placeholder="sk-..." autocomplete="off" spellcheck="false" />
-        <label class="asr-confirm-label">
-          <input type="checkbox" id="asrRiskAck" />
-          我已了解 Key 存在泄露风险，仅个人使用，并已设置 OpenAI 用量限制
-        </label>
+        <label for="serverUrlInput">服务器地址</label>
+        <input type="url" class="asr-key-input" id="serverUrlInput" placeholder="https://your-app.onrender.com" autocomplete="off" />
+        <label for="serverSecretInput">连接密钥（可选，与服务器 API_SECRET 一致）</label>
+        <input type="password" class="asr-key-input" id="serverSecretInput" placeholder="留空则服务器未启用密钥时可用" autocomplete="off" />
         <div class="btn-row">
-          <button type="button" class="primary-btn" id="saveAsrKeyBtn">保存并启用</button>
-          <button type="button" class="secondary-btn" id="clearAsrKeyBtn">清除</button>
+          <button type="button" class="primary-btn" id="saveServerBtn">测试并保存</button>
+          <button type="button" class="secondary-btn" id="clearServerBtn">清除</button>
         </div>
-        <p class="asr-status" id="asrStatus">未启用 · 使用浏览器识别（准确度较低）</p>
-        <p class="asr-note">在 <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a> 创建 Key · Whisper 约 $0.006/分钟</p>
+        <p class="asr-status" id="asrStatus">未连接 · 使用浏览器识别（准确度较低）</p>
+        <p class="asr-note">部署说明见仓库 <strong>SERVER.md</strong></p>
       </details>
 
       <div class="card record-card disabled" id="recordCard">
         <div class="mic-granted-badge" id="micGrantedBadge" hidden>✓ 麦克风已就绪</div>
-        <span class="asr-badge" id="asrBadge" hidden>Whisper ASR</span>
+        <span class="asr-badge" id="asrBadge" hidden>服务端 ASR</span>
         <div class="record-stage">
           <div class="record-visual" id="recordVisual">
             <div class="ripple-layer" aria-hidden="true">
@@ -252,6 +249,7 @@
   <script src="js/mood.js"></script>
   <script src="js/share-image.js"></script>
   <script src="js/ios.js"></script>
+  <script src="js/api-client.js"></script>
   <script src="js/asr.js"></script>
   <script src="js/app.js"></script>
   <script>document.addEventListener("DOMContentLoaded", () => IOSApp.init());</script>

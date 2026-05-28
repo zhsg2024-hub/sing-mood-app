@@ -1,0 +1,20 @@
+# Render Blueprint：https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: sing-mood-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: WHISPER_MODEL
+        value: whisper-1
+      - key: API_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://zhsg2024-hub.github.io

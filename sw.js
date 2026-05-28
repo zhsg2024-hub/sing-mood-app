@@ -1,10 +1,11 @@
-const CACHE = "sing-mood-v5";
+const CACHE = "sing-mood-v6";
 const ASSETS = [
   "./index.html",
   "./styles.css",
   "./ios.css",
   "./manifest.json",
   "./js/app.js",
+  "./js/api-client.js",
   "./js/asr.js",
   "./js/songs.js",
   "./js/matcher.js",
