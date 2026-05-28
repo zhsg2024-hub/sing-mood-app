@@ -162,6 +162,7 @@
         <ul>
           <li>日文歌选 <strong>日本語</strong>，念 <strong>lemon</strong> 或日文歌词</li>
           <li>外文歌请选 <strong>English</strong> 或 <strong>自动</strong>，再念英文歌词</li>
+          <li>常见歌词（如「我爱你」）易认错，请多哼 <strong>2～3 句</strong> 更有特色的歌词</li>
           <li>跑调没关系，哼旋律或念歌词都可以</li>
           <li>念错字也行，我们会模糊匹配</li>
           <li>因版权原因，暂不提供原曲播放，仅显示歌词跟唱</li>
@@ -232,6 +233,16 @@
         <p class="wechat-tip">复制后打开微信 → 聊天框长按 → 粘贴</p>
       </div>
     </section>
+
+    <!-- 识曲候选（歌词重复时让用户选） -->
+    <div class="pick-overlay" id="pickOverlay" hidden>
+      <div class="pick-modal card">
+        <h3>请选择正确的歌曲</h3>
+        <p class="pick-hint" id="pickHint">这段歌词可能对应多首歌</p>
+        <div class="pick-list" id="pickList"></div>
+        <button type="button" class="secondary-btn" id="pickCancelBtn">取消</button>
+      </div>
+    </div>
 
     <!-- 识别中遮罩 -->
     <div class="overlay" id="loadingOverlay" hidden>

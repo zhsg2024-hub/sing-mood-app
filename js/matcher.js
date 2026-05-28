@@ -207,23 +207,30 @@ const SongMatcher = (() => {
   function matchByText(recognizedText, songs = SONG_DATABASE) {
     if (!recognizedText?.trim()) return null;
 
-    let best = null;
-    let bestScore = 0;
-
+    const scored = [];
     for (const song of songs) {
       const score = scoreSong(recognizedText, song);
-      if (score > bestScore) {
-        bestScore = score;
-        best = { song, score, method: "text" };
-      }
+      if (score > 0) scored.push({ song, score, method: "text" });
     }
+    scored.sort((a, b) => b.score - a.score);
+
+    const best = scored[0];
+    const second = scored[1];
+    if (!best) return null;
 
     const threshold = matchThreshold(recognizedText);
-    if (best && bestScore >= threshold) {
-      best.confidence = Math.min(99, Math.round(bestScore * 100));
-      return best;
-    }
-    return null;
+    if (best.score < threshold) return null;
+
+    // 多首歌得分接近且输入较短 → 交给 AI 消歧
+    const textLen = recognizedText.replace(/\s/g, "").length;
+    if (second && best.score - second.score < 0.1 && textLen <= 8) return null;
+
+    return {
+      song: best.song,
+      score: best.score,
+      method: "text",
+      confidence: Math.min(99, Math.round(best.score * 100)),
+    };
   }
 
   async function extractAudioFingerprint(blob) {

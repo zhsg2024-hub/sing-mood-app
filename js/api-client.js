@@ -35,13 +35,15 @@ const ApiClient = (() => {
     return data;
   }
 
-  async function identifySong(text, langMode = "auto") {
+  async function identifySong(text, langMode = "auto", pick = null) {
     const base = getBaseUrl();
     if (!base) throw new Error("未配置服务器地址");
+    const body = { text, langMode };
+    if (pick) Object.assign(body, pick);
     const res = await fetch(`${base}/api/song/identify`, {
       method: "POST",
       headers: buildHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ text, langMode }),
+      body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `AI 识曲失败 (${res.status})`);

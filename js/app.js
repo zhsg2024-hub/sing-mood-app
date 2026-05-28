@@ -484,14 +484,18 @@
     }
     showLoading("正在匹配歌曲…");
     SongMatcher.matchByText(text).then(async (match) => {
-      const resolved = await resolveSongMatch(text, match);
-      hideLoading();
-      if (resolved) {
-        state.matchResult = resolved;
-        state.recognizedText = text;
-        openSingScreen(resolved);
-      } else {
-        showToast("暂未匹配到歌曲，换个关键词试试");
+      try {
+        const resolved = await resolveSongMatch(text, match);
+        if (resolved) {
+          state.matchResult = resolved;
+          state.recognizedText = text;
+          openSingScreen(resolved);
+        } else if (!match) {
+          showToast("暂未匹配到歌曲，请多哼几句更有特色的歌词");
+        }
+      } catch (err) {
+        hideLoading();
+        showToast(err.message || "识曲失败");
       }
     });
   });
@@ -773,6 +777,53 @@
   recordBtn.addEventListener("touchend", (e) => { e.preventDefault(); stopRecording(); });
   recordBtn.addEventListener("touchcancel", (e) => { e.preventDefault(); stopRecording(); });
 
+  // --- 识曲候选选择 ---
+  function showCandidatePicker(candidates, recognizedText, hint) {
+    return new Promise((resolve, reject) => {
+      const overlay = document.getElementById("pickOverlay");
+      const list = document.getElementById("pickList");
+      const hintEl = document.getElementById("pickHint");
+      const cancelBtn = document.getElementById("pickCancelBtn");
+      if (!overlay || !list) {
+        reject(new Error("界面未就绪"));
+        return;
+      }
+
+      hintEl.textContent =
+        hint || "这段歌词在多首歌里都有，请选择你正在哼的那一首";
+      list.innerHTML = "";
+
+      candidates.forEach((c) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "pick-item";
+        btn.innerHTML = `
+          <div class="pick-item-title">${c.title} · 原唱 ${c.artist || "—"}</div>
+          <div class="pick-item-meta">${c.matchedLyric ? `「${c.matchedLyric}」 · ` : ""}匹配度 ${Math.round(c.confidence || 0)}%</div>`;
+        btn.addEventListener("click", () => {
+          overlay.hidden = true;
+          resolve(c);
+        });
+        list.appendChild(btn);
+      });
+
+      const onCancel = () => {
+        overlay.hidden = true;
+        cancelBtn.removeEventListener("click", onCancel);
+        reject(new Error("已取消选择"));
+      };
+      cancelBtn.addEventListener("click", onCancel);
+      overlay.hidden = false;
+    });
+  }
+
+  async function finalizeLlmMatch(recognizedText, pick) {
+    showLoading("生成歌词…");
+    const result = await ApiClient.identifySong(recognizedText, state.langMode, pick);
+    hideLoading();
+    return SongMatcher.buildFromLlmIdentify(result);
+  }
+
   // --- 识曲匹配：库内本地 / 库外 AI 识曲+歌词 ---
   async function resolveSongMatch(recognizedText, localMatch) {
     if (localMatch) {
@@ -782,12 +833,26 @@
     if (!ApiClient.isConfigured()) return null;
 
     try {
-      showLoading("AI 识曲并生成歌词…");
+      showLoading("AI 识曲中…");
       const result = await ApiClient.identifySong(recognizedText, state.langMode);
+      hideLoading();
+
+      if (result.needsPick && result.candidates?.length) {
+        const pick = await showCandidatePicker(
+          result.candidates,
+          recognizedText,
+          result.hint
+        );
+        return finalizeLlmMatch(recognizedText, pick);
+      }
+
       return SongMatcher.buildFromLlmIdentify(result);
     } catch (err) {
-      console.error(err);
-      showToast(`AI 识曲失败：${err.message}`);
+      hideLoading();
+      if (err.message !== "已取消选择") {
+        console.error(err);
+        showToast(`AI 识曲失败：${err.message}`);
+      }
       return null;
     }
   }

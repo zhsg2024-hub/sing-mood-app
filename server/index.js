@@ -208,117 +208,179 @@ function normalizeLrc(raw, title, artist, bpm = 72) {
   return out.join("\n");
 }
 
-async function identifySongWithLyrics(text, langMode = "auto") {
-  const langHint =
-    langMode === "en"
-      ? "可能是英文歌，歌名/歌手/歌词用英文"
-      : langMode === "ja"
-        ? "可能是日文歌，歌名/歌手/歌词用日文"
-        : langMode === "zh"
-          ? "可能是中文歌，歌名/歌手用简体正式名"
-          : "可能是中文、英文或日文歌";
-
-  const identifySystem = `你是专业音乐识曲引擎。用户通过哼唱或念歌词来识别歌曲，输入来自 ASR，可能有错字、谐音、缺字或标点错误。
-
-你的任务：
-1. 根据歌词片段/歌名线索，匹配真实的歌曲
-2. title 必须是正式发行歌名（不要把一句歌词当作歌名）
-3. artist 必须是原唱/原曲演唱者（不要填翻唱者、翻唱版、综艺 cover 歌手）
-4. 先判断输入更像歌词还是歌名，再反推对应歌曲
-5. confidence 为 0-100；不确定时低于 50
-
-只输出 JSON，不要 markdown：
-{"title":"正式歌名","artist":"原唱歌手","confidence":0,"bpm":72,"matchedLyric":"最匹配的一句歌词","reason":"识别依据"}`;
-
-  const guessRaw = await chatComplete(
-    [
-      { role: "system", content: identifySystem },
-      { role: "user", content: `${langHint}\n\n用户 ASR 输入：\n${text.trim()}` },
-    ],
-    450,
-    IDENTIFY_MODEL
-  );
-
-  let guess = parseJsonFromContent(guessRaw);
-  if (!guess?.title) throw new Error("AI 未能识别歌曲");
-
-  const verifyRaw = await chatComplete(
-    [
-      {
-        role: "system",
-        content: `你是音乐百科核对专家。核对并修正歌曲识别结果，确保：
-- title：正式、通用、可检索的标准歌名
-- artist：原唱（录音室原版/首次广泛传播版本的演唱者）
-- 不要把歌词句子、专辑名、影视剧名当作歌名
-- 不要把翻唱者、抖音热歌翻唱版歌手当作原唱
-
-只输出 JSON：
-{"title":"正式歌名","artist":"原唱","confidence":0,"bpm":72,"corrected":false,"reason":"核对说明"}`,
-      },
-      {
-        role: "user",
-        content: `${langHint}
-
-用户 ASR 输入：
-${text.trim()}
-
-初步识别：
-《${String(guess.title).trim()}》 - ${String(guess.artist || "").trim()}
-匹配歌词：${String(guess.matchedLyric || "").trim()}
-
-请核对并返回正确的正式歌名与原唱。若初步识别有误必须修正。`,
-      },
-    ],
-    450,
-    IDENTIFY_MODEL
-  );
-
-  const verified = parseJsonFromContent(verifyRaw);
-  if (verified?.title) {
-    const vConf = Number(verified.confidence) || 0;
-    const gConf = Number(guess.confidence) || 0;
-    if (verified.corrected || vConf >= gConf) guess = { ...guess, ...verified };
-  }
-
-  const title = String(guess.title).trim();
-  const artist = String(guess.artist || guess.originalArtist || "").trim();
-  if (!artist) throw new Error("AI 未能识别原唱歌手");
-  const bpm = Math.min(180, Math.max(60, Number(guess.bpm) || 72));
-
+async function generateLyricsForSong(title, artist, text, bpm = 72) {
   const lrcRaw = await chatComplete(
     [
       {
         role: "system",
-        content: `你是歌词专家。请输出「${title}」原唱 ${artist} 版本的 standard 歌词，LRC 格式。
+        content: `你是歌词专家。请输出「${title}」原唱 ${artist} 版本的标准歌词，LRC 格式。
 要求：
 1. 第一行：[00:00.00]${title} - ${artist}
-2. 每行 [mm:ss.ss]歌词，时间递增，约每 3~4 秒一行
-3. 输出主歌+副歌完整段落，至少 16 行
-4. 必须是该歌原唱版常见歌词，不要编造无关内容
-5. 只输出 LRC，不要 markdown`,
+2. 每行 [mm:ss.ss]歌词，约每 3~4 秒一行
+3. 主歌+副歌完整段落，至少 16 行
+4. 只输出 LRC，不要 markdown`,
       },
       {
         role: "user",
-        content: `请输出《${title}》（原唱：${artist}）的完整 LRC 歌词。用户哼唱片段：${text.trim()}`,
+        content: `请输出《${title}》（原唱：${artist}）的完整 LRC。用户哼唱/念词片段：${text.trim()}`,
       },
     ],
     2500,
     IDENTIFY_MODEL
   );
+  return normalizeLrc(lrcRaw, title, artist, bpm);
+}
 
-  const lrc = normalizeLrc(lrcRaw, title, artist, bpm);
+function candidateScore(c) {
+  return (Number(c.confidence) || 0) * 0.45 + (Number(c.distinctiveness) || 0) * 0.55;
+}
 
+function normalizeCandidates(raw) {
+  const list = Array.isArray(raw?.candidates) ? raw.candidates : [];
+  return list
+    .filter((c) => c?.title)
+    .map((c) => ({
+      title: String(c.title).trim(),
+      artist: String(c.artist || c.originalArtist || "").trim(),
+      confidence: Math.min(99, Math.max(0, Number(c.confidence) || 0)),
+      distinctiveness: Math.min(99, Math.max(0, Number(c.distinctiveness) || 0)),
+      matchedLyric: String(c.matchedLyric || "").trim(),
+      reason: String(c.reason || "").trim(),
+      bpm: Math.min(180, Math.max(60, Number(c.bpm) || 72)),
+    }))
+    .sort((a, b) => candidateScore(b) - candidateScore(a));
+}
+
+function shouldAskUserToPick(candidates, ambiguousFlag) {
+  if (candidates.length <= 1) return false;
+  const best = candidates[0];
+  const second = candidates[1];
+  const gap = candidateScore(best) - candidateScore(second);
+  if (ambiguousFlag) return true;
+  if (best.distinctiveness < 58) return true;
+  if (best.confidence < 78 && candidates.length > 1) return true;
+  if (gap < 12) return true;
+  return false;
+}
+
+async function identifyCandidates(text, langMode = "auto") {
+  const langHint =
+    langMode === "en"
+      ? "可能是英文歌"
+      : langMode === "ja"
+        ? "可能是日文歌"
+        : langMode === "zh"
+          ? "可能是中文歌"
+          : "可能是中文、英文或日文歌";
+
+  const raw = await chatComplete(
+    [
+      {
+        role: "system",
+        content: `你是专业音乐识曲引擎。输入来自 ASR，可能有错字。
+
+关键规则（非常重要）：
+- 很多歌词在多首歌里重复（如「我爱你」「对不起」「后来」「想你」「回忆」「温柔」「孤独」等）
+- 若输入是常见短句，必须列出多首候选，不要武断只返回一首
+- distinctiveness：该输入对某首歌的唯一性（0-100，越高越能确定）
+- 输入越短、越常见，confidence 应越低
+- title 为正式歌名，artist 为原唱
+
+只输出 JSON：
+{"ambiguous":true,"candidates":[{"title":"","artist":"","confidence":0,"distinctiveness":0,"bpm":72,"matchedLyric":"","reason":""}]}`,
+      },
+      { role: "user", content: `${langHint}\n\n用户输入：\n${text.trim()}` },
+    ],
+    800,
+    IDENTIFY_MODEL
+  );
+
+  const parsed = parseJsonFromContent(raw);
+  const candidates = normalizeCandidates(parsed);
+  if (!candidates.length) throw new Error("AI 未能识别歌曲");
+  return { candidates, ambiguous: Boolean(parsed.ambiguous) };
+}
+
+async function verifyCandidate(text, langMode, candidate) {
+  const langHint =
+    langMode === "zh" ? "中文歌" : langMode === "en" ? "英文歌" : langMode === "ja" ? "日文歌" : "中/英/日";
+
+  const raw = await chatComplete(
+    [
+      {
+        role: "system",
+        content: `核对歌曲候选是否正确。确保 title 为正式歌名、artist 为原唱。若输入是常见歌词且该候选不对，返回 corrected:true 并给出更合适的 title/artist。
+只输出 JSON：{"title":"","artist":"","confidence":0,"bpm":72,"corrected":false,"reason":""}`,
+      },
+      {
+        role: "user",
+        content: `${langHint}
+用户输入：${text.trim()}
+候选：《${candidate.title}》 - ${candidate.artist}
+匹配句：${candidate.matchedLyric || ""}`,
+      },
+    ],
+    350,
+    IDENTIFY_MODEL
+  );
+
+  const v = parseJsonFromContent(raw);
+  if (!v?.title) return candidate;
+  return {
+    ...candidate,
+    title: String(v.title).trim(),
+    artist: String(v.artist || candidate.artist).trim(),
+    confidence: Math.min(99, Number(v.confidence) || candidate.confidence),
+    bpm: Math.min(180, Math.max(60, Number(v.bpm) || candidate.bpm)),
+    reason: String(v.reason || candidate.reason).trim(),
+  };
+}
+
+async function buildSongResult(title, artist, text, meta = {}) {
+  const bpm = Math.min(180, Math.max(60, Number(meta.bpm) || 72));
+  const lrc = await generateLyricsForSong(title, artist, text, bpm);
   return {
     title,
     artist,
     originalArtist: artist,
-    confidence: Math.min(99, Math.max(0, Number(guess.confidence) || 75)),
+    confidence: Math.min(99, Math.max(0, Number(meta.confidence) || 75)),
     bpm,
     lrc,
-    matchedLyric: String(guess.matchedLyric || "").trim(),
-    reason: String(guess.reason || verified?.reason || "").trim(),
+    matchedLyric: String(meta.matchedLyric || "").trim(),
+    reason: String(meta.reason || "").trim(),
     provider: PROVIDER,
   };
+}
+
+async function identifySongWithLyrics(text, langMode = "auto", forced = null) {
+  if (forced?.title) {
+    const artist = String(forced.artist || "").trim();
+    if (!artist) throw new Error("缺少原唱歌手");
+    const verified = await verifyCandidate(text, langMode, {
+      title: forced.title.trim(),
+      artist,
+      confidence: forced.confidence || 80,
+      bpm: forced.bpm || 72,
+      matchedLyric: forced.matchedLyric || "",
+      reason: forced.reason || "",
+    });
+    return buildSongResult(verified.title, verified.artist, text, verified);
+  }
+
+  const { candidates, ambiguous } = await identifyCandidates(text, langMode);
+
+  if (shouldAskUserToPick(candidates, ambiguous)) {
+    return {
+      needsPick: true,
+      ambiguous: true,
+      candidates: candidates.slice(0, 4),
+      hint: "这段歌词可能对应多首歌，请选择正确的一首",
+    };
+  }
+
+  const best = await verifyCandidate(text, langMode, candidates[0]);
+  if (!best.artist) throw new Error("AI 未能识别原唱歌手");
+  return buildSongResult(best.title, best.artist, text, best);
 }
 
 function parseJsonFromContent(content) {
@@ -371,7 +433,7 @@ app.get("/api/health", (_req, res) => {
     identifyModel: IDENTIFY_MODEL,
     asrModel: ASR_MODEL,
     https: Boolean(HTTPS_KEY_PATH && HTTPS_CERT_PATH),
-    version: "1.2.0",
+    version: "1.3.0",
   });
 });
 
@@ -414,9 +476,11 @@ app.post("/api/song/guess", requireClientAuth, requireApiKey, async (req, res) =
 
 app.post("/api/song/identify", requireClientAuth, requireApiKey, async (req, res) => {
   try {
-    const { text, langMode = "auto" } = req.body || {};
+    const { text, langMode = "auto", title, artist, confidence, bpm, matchedLyric, reason } =
+      req.body || {};
     if (!text?.trim()) return res.status(400).json({ error: "缺少 text" });
-    const result = await identifySongWithLyrics(text, langMode);
+    const forced = title ? { title, artist, confidence, bpm, matchedLyric, reason } : null;
+    const result = await identifySongWithLyrics(text, langMode, forced);
     res.json(result);
   } catch (err) {
     console.error("Identify error:", err);
