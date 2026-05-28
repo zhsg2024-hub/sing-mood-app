@@ -893,7 +893,8 @@
     const bpm = song.bpm || 72;
 
     $("#songTitle").textContent = song.title;
-    $("#songArtist").textContent = song.artist;
+    $("#songArtist").textContent =
+      matchResult.method === "llm" ? `原唱：${song.artist}` : song.artist;
     const methodLabels = { api: "在线识曲", asr: "服务端 ASR", text: "曲库匹配", llm: "AI 识曲+歌词" };
     $("#matchBadge").textContent = `匹配度 ${confidence}% · ${methodLabels[matchResult.method] || "智能匹配"}`;
     $("#bpmLabel").textContent = `${bpm} BPM`;

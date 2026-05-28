@@ -276,14 +276,15 @@ const SongMatcher = (() => {
     if (!data?.title?.trim() || !data?.lrc?.trim()) return null;
 
     const title = data.title.trim();
-    const artist = (data.artist || "").trim();
+    const artist = (data.originalArtist || data.artist || "").trim();
+    if (!artist) return null;
     const confidence = Math.min(99, Math.round(Number(data.confidence) || 75));
     const bpm = Math.min(180, Math.max(60, Number(data.bpm) || 72));
 
     const song = {
       id: `llm-${Date.now()}`,
       title,
-      artist: artist || "未知歌手",
+      artist,
       lang: "zh",
       bpm,
       keywords: [],
@@ -296,6 +297,7 @@ const SongMatcher = (() => {
       method: "llm",
       inLibrary: false,
       reason: data.reason || "",
+      matchedLyric: data.matchedLyric || "",
     };
   }
 

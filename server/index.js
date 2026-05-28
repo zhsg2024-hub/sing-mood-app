@@ -26,6 +26,8 @@ const BASE_URL = (
 ).replace(/\/$/, "");
 const CHAT_MODEL =
   process.env.CHAT_MODEL || (PROVIDER === "openai" ? "gpt-4o-mini" : "qwen-turbo");
+const IDENTIFY_MODEL =
+  process.env.IDENTIFY_MODEL || (PROVIDER === "openai" ? "gpt-4o-mini" : "qwen-plus");
 const ASR_MODEL =
   process.env.ASR_MODEL || (PROVIDER === "openai" ? "whisper-1" : "qwen3-asr-flash");
 const API_SECRET = process.env.API_SECRET || "";
@@ -209,50 +211,99 @@ function normalizeLrc(raw, title, artist, bpm = 72) {
 async function identifySongWithLyrics(text, langMode = "auto") {
   const langHint =
     langMode === "en"
-      ? "可能是英文歌，歌词用英文"
+      ? "可能是英文歌，歌名/歌手/歌词用英文"
       : langMode === "ja"
-        ? "可能是日文歌，歌词用日文"
+        ? "可能是日文歌，歌名/歌手/歌词用日文"
         : langMode === "zh"
-          ? "可能是中文歌，歌词用中文"
+          ? "可能是中文歌，歌名/歌手用简体正式名"
           : "可能是中文、英文或日文歌";
+
+  const identifySystem = `你是专业音乐识曲引擎。用户通过哼唱或念歌词来识别歌曲，输入来自 ASR，可能有错字、谐音、缺字或标点错误。
+
+你的任务：
+1. 根据歌词片段/歌名线索，匹配真实的歌曲
+2. title 必须是正式发行歌名（不要把一句歌词当作歌名）
+3. artist 必须是原唱/原曲演唱者（不要填翻唱者、翻唱版、综艺 cover 歌手）
+4. 先判断输入更像歌词还是歌名，再反推对应歌曲
+5. confidence 为 0-100；不确定时低于 50
+
+只输出 JSON，不要 markdown：
+{"title":"正式歌名","artist":"原唱歌手","confidence":0,"bpm":72,"matchedLyric":"最匹配的一句歌词","reason":"识别依据"}`;
 
   const guessRaw = await chatComplete(
     [
-      {
-        role: "system",
-        content:
-          '你是音乐识曲专家。根据用户哼唱/念出的文字推测歌曲。只输出 JSON：{"title":"歌名","artist":"歌手","confidence":0-100,"bpm":72,"reason":"简短理由"}',
-      },
-      { role: "user", content: `${langHint}。用户输入：\n${text.trim()}` },
+      { role: "system", content: identifySystem },
+      { role: "user", content: `${langHint}\n\n用户 ASR 输入：\n${text.trim()}` },
     ],
-    300
+    450,
+    IDENTIFY_MODEL
   );
 
-  const guess = parseJsonFromContent(guessRaw);
+  let guess = parseJsonFromContent(guessRaw);
   if (!guess?.title) throw new Error("AI 未能识别歌曲");
 
+  const verifyRaw = await chatComplete(
+    [
+      {
+        role: "system",
+        content: `你是音乐百科核对专家。核对并修正歌曲识别结果，确保：
+- title：正式、通用、可检索的标准歌名
+- artist：原唱（录音室原版/首次广泛传播版本的演唱者）
+- 不要把歌词句子、专辑名、影视剧名当作歌名
+- 不要把翻唱者、抖音热歌翻唱版歌手当作原唱
+
+只输出 JSON：
+{"title":"正式歌名","artist":"原唱","confidence":0,"bpm":72,"corrected":false,"reason":"核对说明"}`,
+      },
+      {
+        role: "user",
+        content: `${langHint}
+
+用户 ASR 输入：
+${text.trim()}
+
+初步识别：
+《${String(guess.title).trim()}》 - ${String(guess.artist || "").trim()}
+匹配歌词：${String(guess.matchedLyric || "").trim()}
+
+请核对并返回正确的正式歌名与原唱。若初步识别有误必须修正。`,
+      },
+    ],
+    450,
+    IDENTIFY_MODEL
+  );
+
+  const verified = parseJsonFromContent(verifyRaw);
+  if (verified?.title) {
+    const vConf = Number(verified.confidence) || 0;
+    const gConf = Number(guess.confidence) || 0;
+    if (verified.corrected || vConf >= gConf) guess = { ...guess, ...verified };
+  }
+
   const title = String(guess.title).trim();
-  const artist = String(guess.artist || "").trim();
+  const artist = String(guess.artist || guess.originalArtist || "").trim();
+  if (!artist) throw new Error("AI 未能识别原唱歌手");
   const bpm = Math.min(180, Math.max(60, Number(guess.bpm) || 72));
 
   const lrcRaw = await chatComplete(
     [
       {
         role: "system",
-        content: `你是歌词专家。输出标准 LRC 歌词，用于跟唱展示。
+        content: `你是歌词专家。请输出「${title}」原唱 ${artist} 版本的 standard 歌词，LRC 格式。
 要求：
 1. 第一行：[00:00.00]${title} - ${artist}
-2. 每行格式 [mm:ss.ss]歌词，时间递增，约每 3~4 秒一行
-3. 输出主歌+副歌等主要段落，尽量完整（至少 16 行歌词）
-4. 只输出 LRC 文本，不要 markdown、不要解释
-5. BPM 约 ${bpm}`,
+2. 每行 [mm:ss.ss]歌词，时间递增，约每 3~4 秒一行
+3. 输出主歌+副歌完整段落，至少 16 行
+4. 必须是该歌原唱版常见歌词，不要编造无关内容
+5. 只输出 LRC，不要 markdown`,
       },
       {
         role: "user",
-        content: `请输出《${title}》${artist ? `- ${artist}` : ""}的常用演唱版完整歌词（LRC 格式）。用户刚唱到的片段：${text.trim()}`,
+        content: `请输出《${title}》（原唱：${artist}）的完整 LRC 歌词。用户哼唱片段：${text.trim()}`,
       },
     ],
-    2500
+    2500,
+    IDENTIFY_MODEL
   );
 
   const lrc = normalizeLrc(lrcRaw, title, artist, bpm);
@@ -260,10 +311,12 @@ async function identifySongWithLyrics(text, langMode = "auto") {
   return {
     title,
     artist,
+    originalArtist: artist,
     confidence: Math.min(99, Math.max(0, Number(guess.confidence) || 75)),
     bpm,
     lrc,
-    reason: String(guess.reason || "").trim(),
+    matchedLyric: String(guess.matchedLyric || "").trim(),
+    reason: String(guess.reason || verified?.reason || "").trim(),
     provider: PROVIDER,
   };
 }
@@ -281,15 +334,15 @@ function parseJsonFromContent(content) {
   }
 }
 
-async function chatComplete(messages, maxTokens = 200) {
+async function chatComplete(messages, maxTokens = 200, model = CHAT_MODEL) {
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: "POST",
     headers: apiHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
-      model: CHAT_MODEL,
+      model,
       messages,
       max_tokens: maxTokens,
-      temperature: 0.3,
+      temperature: model === IDENTIFY_MODEL ? 0.15 : 0.3,
     }),
   });
   const data = await res.json();
@@ -315,9 +368,10 @@ app.get("/api/health", (_req, res) => {
     auth: Boolean(API_SECRET),
     provider: PROVIDER,
     chatModel: CHAT_MODEL,
+    identifyModel: IDENTIFY_MODEL,
     asrModel: ASR_MODEL,
     https: Boolean(HTTPS_KEY_PATH && HTTPS_CERT_PATH),
-    version: "1.1.0",
+    version: "1.2.0",
   });
 });
 
@@ -415,7 +469,7 @@ function startServer() {
   const onListen = (scheme) => {
     console.log(`sing-mood-server ${scheme}://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
     if (HOST === "0.0.0.0") console.log(`LAN: ${scheme}://192.168.88.16:${PORT} (按实际 IP 替换)`);
-    console.log(`Provider: ${PROVIDER} | Chat: ${CHAT_MODEL} | ASR: ${ASR_MODEL}`);
+    console.log(`Provider: ${PROVIDER} | Identify: ${IDENTIFY_MODEL} | Chat: ${CHAT_MODEL} | ASR: ${ASR_MODEL}`);
     console.log(`Base URL: ${BASE_URL}`);
     console.log(`ASR: ${API_KEY ? "enabled" : "DISABLED (set DASHSCOPE_API_KEY)"}`);
     if (allowedOrigins.length) console.log(`CORS: ${allowedOrigins.join(", ")}`);
