@@ -1,20 +1,37 @@
 /**
  * 哼歌助手 · 服务端
- * - POST /api/asr/transcribe  Whisper ASR（Key 仅存服务器）
- * - POST /api/mood/generate   心情文案（可选）
+ * - POST /api/asr/transcribe  ASR（OpenAI Whisper 或 百炼 Qwen-ASR）
+ * - POST /api/mood/generate   心情文案
  * - GET  /api/health
  */
 require("dotenv").config();
 
+const fs = require("fs");
+const http = require("http");
+const https = require("https");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const WHISPER_MODEL = process.env.WHISPER_MODEL || "whisper-1";
+const PROVIDER = (process.env.LLM_PROVIDER || "bailian").toLowerCase();
+const API_KEY = process.env.DASHSCOPE_API_KEY || process.env.OPENAI_API_KEY || "";
+const BASE_URL = (
+  process.env.DASHSCOPE_BASE_URL ||
+  process.env.OPENAI_BASE_URL ||
+  (PROVIDER === "openai"
+    ? "https://api.openai.com/v1"
+    : "https://dashscope.aliyuncs.com/compatible-mode/v1")
+).replace(/\/$/, "");
+const CHAT_MODEL =
+  process.env.CHAT_MODEL || (PROVIDER === "openai" ? "gpt-4o-mini" : "qwen-turbo");
+const ASR_MODEL =
+  process.env.ASR_MODEL || (PROVIDER === "openai" ? "whisper-1" : "qwen3-asr-flash");
 const API_SECRET = process.env.API_SECRET || "";
+const HTTPS_KEY_PATH = process.env.HTTPS_KEY_PATH || "";
+const HTTPS_CERT_PATH = process.env.HTTPS_CERT_PATH || "";
+const HOST = process.env.HOST || "0.0.0.0";
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
@@ -49,12 +66,26 @@ function requireClientAuth(req, res, next) {
   next();
 }
 
-function requireOpenAI(_req, res, next) {
-  if (!OPENAI_API_KEY) {
-    return res.status(503).json({ error: "服务器未配置 OPENAI_API_KEY" });
+function requireApiKey(_req, res, next) {
+  if (!API_KEY) {
+    return res.status(503).json({
+      error:
+        PROVIDER === "openai"
+          ? "服务器未配置 OPENAI_API_KEY"
+          : "服务器未配置 DASHSCOPE_API_KEY",
+    });
   }
   next();
 }
+
+function apiHeaders(extra = {}) {
+  return {
+    Authorization: `Bearer ${API_KEY}`,
+    ...extra,
+  };
+}
+
+const ASR_LANG_MAP = { zh: "zh", en: "en", ja: "ja" };
 
 const ASR_PROMPTS = {
   zh: "以下是一段中文歌曲的歌词演唱或念白，请准确转写汉字歌词。",
@@ -65,19 +96,118 @@ const ASR_PROMPTS = {
 
 const LANG_MAP = { zh: "zh", en: "en", ja: "ja", auto: null };
 
+function mimeForUpload(mimetype) {
+  if (mimetype?.includes("wav")) return "audio/wav";
+  if (mimetype?.includes("mp4") || mimetype?.includes("m4a")) return "audio/mp4";
+  if (mimetype?.includes("mpeg") || mimetype?.includes("mp3")) return "audio/mpeg";
+  if (mimetype?.includes("webm")) return "audio/webm";
+  return mimetype || "audio/webm";
+}
+
+async function transcribeWithBailian(buffer, mimetype, langMode) {
+  const mime = mimeForUpload(mimetype);
+  const base64 = buffer.toString("base64");
+  const dataUri = `data:${mime};base64,${base64}`;
+
+  const asrOptions = { enable_itn: false };
+  const lang = ASR_LANG_MAP[langMode];
+  if (lang) asrOptions.language = lang;
+
+  const res = await fetch(`${BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: apiHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      model: ASR_MODEL,
+      stream: false,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_audio",
+              input_audio: { data: dataUri },
+            },
+          ],
+        },
+      ],
+      asr_options: asrOptions,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error?.message || data.message || `百炼 ASR 失败 (${res.status})`);
+  }
+
+  const text = (data.choices?.[0]?.message?.content || "").trim();
+  return { text, provider: "bailian-qwen-asr", language: lang || "auto" };
+}
+
+async function transcribeWithOpenAI(buffer, mimetype, langMode) {
+  const lang = LANG_MAP[langMode] ?? null;
+  const prompt = ASR_PROMPTS[langMode] || ASR_PROMPTS.auto;
+
+  const ext = mimetype?.includes("mp4")
+    ? "mp4"
+    : mimetype?.includes("wav")
+      ? "wav"
+      : "webm";
+
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([buffer], { type: mimetype || "audio/webm" }),
+    `recording.${ext}`
+  );
+  form.append("model", ASR_MODEL);
+  form.append("response_format", "json");
+  form.append("prompt", prompt);
+  if (lang) form.append("language", lang);
+
+  const res = await fetch(`${BASE_URL}/audio/transcriptions`, {
+    method: "POST",
+    headers: apiHeaders(),
+    body: form,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Whisper 识别失败 (${res.status})`);
+  }
+
+  return {
+    text: (data.text || "").trim(),
+    provider: "openai-whisper",
+    language: lang || "auto",
+  };
+}
+
+app.get("/", (_req, res) => {
+  res.json({
+    name: "哼歌助手服务端",
+    ok: true,
+    health: "/api/health",
+    hint: "前端请连接此地址（不含路径），例如 https://192.168.88.16:3000",
+  });
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    asr: Boolean(OPENAI_API_KEY),
+    asr: Boolean(API_KEY),
     auth: Boolean(API_SECRET),
-    version: "1.0.0",
+    provider: PROVIDER,
+    chatModel: CHAT_MODEL,
+    asrModel: ASR_MODEL,
+    https: Boolean(HTTPS_KEY_PATH && HTTPS_CERT_PATH),
+    version: "1.1.0",
   });
 });
 
 app.post(
   "/api/asr/transcribe",
   requireClientAuth,
-  requireOpenAI,
+  requireApiKey,
   upload.single("audio"),
   async (req, res) => {
     try {
@@ -86,44 +216,12 @@ app.post(
       }
 
       const langMode = req.body.langMode || "auto";
-      const lang = LANG_MAP[langMode] ?? null;
-      const prompt = ASR_PROMPTS[langMode] || ASR_PROMPTS.auto;
+      const result =
+        PROVIDER === "openai"
+          ? await transcribeWithOpenAI(req.file.buffer, req.file.mimetype, langMode)
+          : await transcribeWithBailian(req.file.buffer, req.file.mimetype, langMode);
 
-      const ext = req.file.mimetype?.includes("mp4")
-        ? "mp4"
-        : req.file.mimetype?.includes("wav")
-          ? "wav"
-          : "webm";
-
-      const form = new FormData();
-      form.append(
-        "file",
-        new Blob([req.file.buffer], { type: req.file.mimetype || "audio/webm" }),
-        `recording.${ext}`
-      );
-      form.append("model", WHISPER_MODEL);
-      form.append("response_format", "json");
-      form.append("prompt", prompt);
-      if (lang) form.append("language", lang);
-
-      const oaiRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-        body: form,
-      });
-
-      const data = await oaiRes.json().catch(() => ({}));
-      if (!oaiRes.ok) {
-        return res.status(oaiRes.status).json({
-          error: data.error?.message || "Whisper 识别失败",
-        });
-      }
-
-      res.json({
-        text: (data.text || "").trim(),
-        provider: "openai-whisper",
-        language: lang || "auto",
-      });
+      res.json(result);
     } catch (err) {
       console.error("ASR error:", err);
       res.status(500).json({ error: err.message || "服务器错误" });
@@ -131,19 +229,16 @@ app.post(
   }
 );
 
-app.post("/api/mood/generate", requireClientAuth, requireOpenAI, async (req, res) => {
+app.post("/api/mood/generate", requireClientAuth, requireApiKey, async (req, res) => {
   try {
     const { title, artist, activeLine } = req.body || {};
     if (!title) return res.status(400).json({ error: "缺少 title" });
 
-    const oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    const resChat = await fetch(`${BASE_URL}/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
+      headers: apiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: CHAT_MODEL,
         messages: [
           {
             role: "system",
@@ -159,10 +254,10 @@ app.post("/api/mood/generate", requireClientAuth, requireOpenAI, async (req, res
       }),
     });
 
-    const data = await oaiRes.json();
-    if (!oaiRes.ok) {
-      return res.status(oaiRes.status).json({
-        error: data.error?.message || "文案生成失败",
+    const data = await resChat.json();
+    if (!resChat.ok) {
+      return res.status(resChat.status).json({
+        error: data.error?.message || data.message || "文案生成失败",
       });
     }
 
@@ -175,8 +270,26 @@ app.post("/api/mood/generate", requireClientAuth, requireOpenAI, async (req, res
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`sing-mood-server http://localhost:${PORT}`);
-  console.log(`ASR: ${OPENAI_API_KEY ? "enabled" : "DISABLED (set OPENAI_API_KEY)"}`);
-  if (allowedOrigins.length) console.log(`CORS: ${allowedOrigins.join(", ")}`);
-});
+function startServer() {
+  const onListen = (scheme) => {
+    console.log(`sing-mood-server ${scheme}://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
+    if (HOST === "0.0.0.0") console.log(`LAN: ${scheme}://192.168.88.16:${PORT} (按实际 IP 替换)`);
+    console.log(`Provider: ${PROVIDER} | Chat: ${CHAT_MODEL} | ASR: ${ASR_MODEL}`);
+    console.log(`Base URL: ${BASE_URL}`);
+    console.log(`ASR: ${API_KEY ? "enabled" : "DISABLED (set DASHSCOPE_API_KEY)"}`);
+    if (allowedOrigins.length) console.log(`CORS: ${allowedOrigins.join(", ")}`);
+  };
+
+  if (HTTPS_KEY_PATH && HTTPS_CERT_PATH) {
+    const ssl = {
+      key: fs.readFileSync(HTTPS_KEY_PATH),
+      cert: fs.readFileSync(HTTPS_CERT_PATH),
+    };
+    https.createServer(ssl, app).listen(PORT, HOST, () => onListen("https"));
+    return;
+  }
+
+  http.createServer(app).listen(PORT, HOST, () => onListen("http"));
+}
+
+startServer();

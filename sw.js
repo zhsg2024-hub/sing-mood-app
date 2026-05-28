@@ -1,4 +1,4 @@
-const CACHE = "sing-mood-v6";
+const CACHE = "sing-mood-v7";
 const ASSETS = [
   "./index.html",
   "./styles.css",
@@ -36,6 +36,8 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
+  // 不拦截跨域请求（如连接本地/局域网 ASR 服务器）
+  if (url.origin !== self.location.origin) return;
   const path = url.pathname;
   const useNetworkFirst =
     e.request.mode === "navigate" ||
