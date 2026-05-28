@@ -272,53 +272,32 @@ const SongMatcher = (() => {
     return textResult;
   }
 
-  function resolveGuess(guess, recognizedText = "") {
-    if (!guess?.title?.trim()) return null;
+  function buildFromLlmIdentify(data) {
+    if (!data?.title?.trim() || !data?.lrc?.trim()) return null;
 
-    const title = guess.title.trim();
-    const artist = (guess.artist || "").trim();
-    const confidence = Math.min(99, Math.round(Number(guess.confidence) || 75));
+    const title = data.title.trim();
+    const artist = (data.artist || "").trim();
+    const confidence = Math.min(99, Math.round(Number(data.confidence) || 75));
+    const bpm = Math.min(180, Math.max(60, Number(data.bpm) || 72));
 
-    let song = null;
-    let inLibrary = false;
-    for (const s of SONG_DATABASE) {
-      const titleHit =
-        s.title === title ||
-        s.title.includes(title) ||
-        title.includes(s.title) ||
-        similarity(normalizeCjk(title), normalizeCjk(s.title)) >= 0.55;
-      const artistHit =
-        !artist ||
-        s.artist.includes(artist) ||
-        artist.includes(s.artist) ||
-        similarity(normalizeCjk(artist), normalizeCjk(s.artist)) >= 0.5;
-      if (titleHit && artistHit) {
-        song = s;
-        inLibrary = true;
-        break;
-      }
-    }
-
-    if (!song) {
-      song = {
-        id: `llm-${Date.now()}`,
-        title,
-        artist: artist || "未知歌手",
-        lang: "zh",
-        bpm: 72,
-        keywords: [],
-        lrc: `[00:00.00]${title}${artist ? ` - ${artist}` : ""}\n[00:08.00]${recognizedText.slice(0, 80) || title}`,
-      };
-    }
+    const song = {
+      id: `llm-${Date.now()}`,
+      title,
+      artist: artist || "未知歌手",
+      lang: "zh",
+      bpm,
+      keywords: [],
+      lrc: data.lrc.trim(),
+    };
 
     return {
       song,
       confidence,
       method: "llm",
-      inLibrary,
-      reason: guess.reason || "",
+      inLibrary: false,
+      reason: data.reason || "",
     };
   }
 
-  return { match, matchByText, resolveGuess, similarity, isLatinDominant, hasJapanese };
+  return { match, matchByText, buildFromLlmIdentify, similarity, isLatinDominant, hasJapanese };
 })();

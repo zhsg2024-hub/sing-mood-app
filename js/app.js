@@ -489,9 +489,6 @@
       if (resolved) {
         state.matchResult = resolved;
         state.recognizedText = text;
-        if (resolved.method === "llm" && !resolved.inLibrary) {
-          showToast(`AI 猜歌：${resolved.song.title}（曲库暂无完整歌词）`);
-        }
         openSingScreen(resolved);
       } else {
         showToast("暂未匹配到歌曲，换个关键词试试");
@@ -776,24 +773,23 @@
   recordBtn.addEventListener("touchend", (e) => { e.preventDefault(); stopRecording(); });
   recordBtn.addEventListener("touchcancel", (e) => { e.preventDefault(); stopRecording(); });
 
-  // --- 识曲匹配（本地 + AI 猜歌）---
+  // --- 识曲匹配：库内本地 / 库外 AI 识曲+歌词 ---
   async function resolveSongMatch(recognizedText, localMatch) {
-    const useLlm =
-      ApiClient.isConfigured() &&
-      (!localMatch || localMatch.confidence < 65);
+    if (localMatch) {
+      return { ...localMatch, inLibrary: true };
+    }
 
-    if (!useLlm) return localMatch;
+    if (!ApiClient.isConfigured()) return null;
 
     try {
-      showLoading(localMatch ? "AI 辅助猜歌…" : "AI 正在猜歌…");
-      const guess = await ApiClient.guessSong(recognizedText, state.langMode);
-      const llmMatch = SongMatcher.resolveGuess(guess, recognizedText);
-      if (llmMatch) return llmMatch;
+      showLoading("AI 识曲并生成歌词…");
+      const result = await ApiClient.identifySong(recognizedText, state.langMode);
+      return SongMatcher.buildFromLlmIdentify(result);
     } catch (err) {
       console.error(err);
-      if (localMatch) showToast(`AI 猜歌失败 · 使用本地匹配`);
+      showToast(`AI 识曲失败：${err.message}`);
+      return null;
     }
-    return localMatch;
   }
 
   // --- 识曲处理 ---
@@ -840,7 +836,7 @@
       }
 
       let match = await SongMatcher.match(recognizedText, state.audioBlob);
-      if (ASR.isEnabled() && !auddResult) {
+      if (!auddResult) {
         match = await resolveSongMatch(recognizedText, match);
       }
 
@@ -858,11 +854,8 @@
         }
       } else if (match) {
         state.matchResult = match;
-        if (match.method === "text" && ASR.isEnabled()) {
+        if (match.inLibrary && ASR.isEnabled() && match.method === "text") {
           state.matchResult.method = "asr";
-        }
-        if (match.method === "llm" && !match.inLibrary) {
-          showToast(`AI 猜歌：${match.song.title}（曲库暂无完整歌词）`);
         }
       } else {
         showToast(`未匹配到歌曲 · 识别文字：${recognizedText.slice(0, 20)}…`);
@@ -901,7 +894,7 @@
 
     $("#songTitle").textContent = song.title;
     $("#songArtist").textContent = song.artist;
-    const methodLabels = { api: "在线识曲", asr: "服务端 ASR", text: "智能匹配", llm: "AI 猜歌" };
+    const methodLabels = { api: "在线识曲", asr: "服务端 ASR", text: "曲库匹配", llm: "AI 识曲+歌词" };
     $("#matchBadge").textContent = `匹配度 ${confidence}% · ${methodLabels[matchResult.method] || "智能匹配"}`;
     $("#bpmLabel").textContent = `${bpm} BPM`;
 

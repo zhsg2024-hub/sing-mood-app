@@ -35,17 +35,22 @@ const ApiClient = (() => {
     return data;
   }
 
-  async function guessSong(text, langMode = "auto") {
+  async function identifySong(text, langMode = "auto") {
     const base = getBaseUrl();
     if (!base) throw new Error("未配置服务器地址");
-    const res = await fetch(`${base}/api/song/guess`, {
+    const res = await fetch(`${base}/api/song/identify`, {
       method: "POST",
       headers: buildHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ text, langMode }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `AI 猜歌失败 (${res.status})`);
+    if (!res.ok) throw new Error(data.error || `AI 识曲失败 (${res.status})`);
     return data;
+  }
+
+  /** @deprecated 使用 identifySong */
+  async function guessSong(text, langMode = "auto") {
+    return identifySong(text, langMode);
   }
 
   function saveConfig(baseUrl, apiSecret = "") {
@@ -81,6 +86,7 @@ const ApiClient = (() => {
     buildHeaders,
     health,
     guessSong,
+    identifySong,
     saveConfig,
     clearConfig,
     migrateLegacyKeys,

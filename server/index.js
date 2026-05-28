@@ -182,6 +182,92 @@ async function transcribeWithOpenAI(buffer, mimetype, langMode) {
   };
 }
 
+function normalizeLrc(raw, title, artist, bpm = 72) {
+  let text = (raw || "").trim();
+  const block = text.match(/```[\w]*\s*([\s\S]*?)```/i);
+  if (block) text = block[1].trim();
+
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const hasLrc = lines.some((l) => /^\[\d{2}:\d{2}[.:]\d{2,3}\]/.test(l));
+  if (hasLrc) return lines.join("\n");
+
+  const step = 3.2;
+  let t = 0;
+  const out = [`[00:00.00]${title} - ${artist}`];
+  for (const line of lines) {
+    if (/^[\d:\.\[\]\s-]+$/.test(line)) continue;
+    if (line.includes(title) && line.includes(artist)) continue;
+    t += step;
+    const mm = String(Math.floor(t / 60)).padStart(2, "0");
+    const ss = String(Math.floor(t % 60)).padStart(2, "0");
+    const cs = String(Math.floor((t % 1) * 100)).padStart(2, "0");
+    out.push(`[${mm}:${ss}.${cs}]${line}`);
+  }
+  return out.join("\n");
+}
+
+async function identifySongWithLyrics(text, langMode = "auto") {
+  const langHint =
+    langMode === "en"
+      ? "可能是英文歌，歌词用英文"
+      : langMode === "ja"
+        ? "可能是日文歌，歌词用日文"
+        : langMode === "zh"
+          ? "可能是中文歌，歌词用中文"
+          : "可能是中文、英文或日文歌";
+
+  const guessRaw = await chatComplete(
+    [
+      {
+        role: "system",
+        content:
+          '你是音乐识曲专家。根据用户哼唱/念出的文字推测歌曲。只输出 JSON：{"title":"歌名","artist":"歌手","confidence":0-100,"bpm":72,"reason":"简短理由"}',
+      },
+      { role: "user", content: `${langHint}。用户输入：\n${text.trim()}` },
+    ],
+    300
+  );
+
+  const guess = parseJsonFromContent(guessRaw);
+  if (!guess?.title) throw new Error("AI 未能识别歌曲");
+
+  const title = String(guess.title).trim();
+  const artist = String(guess.artist || "").trim();
+  const bpm = Math.min(180, Math.max(60, Number(guess.bpm) || 72));
+
+  const lrcRaw = await chatComplete(
+    [
+      {
+        role: "system",
+        content: `你是歌词专家。输出标准 LRC 歌词，用于跟唱展示。
+要求：
+1. 第一行：[00:00.00]${title} - ${artist}
+2. 每行格式 [mm:ss.ss]歌词，时间递增，约每 3~4 秒一行
+3. 输出主歌+副歌等主要段落，尽量完整（至少 16 行歌词）
+4. 只输出 LRC 文本，不要 markdown、不要解释
+5. BPM 约 ${bpm}`,
+      },
+      {
+        role: "user",
+        content: `请输出《${title}》${artist ? `- ${artist}` : ""}的常用演唱版完整歌词（LRC 格式）。用户刚唱到的片段：${text.trim()}`,
+      },
+    ],
+    2500
+  );
+
+  const lrc = normalizeLrc(lrcRaw, title, artist, bpm);
+
+  return {
+    title,
+    artist,
+    confidence: Math.min(99, Math.max(0, Number(guess.confidence) || 75)),
+    bpm,
+    lrc,
+    reason: String(guess.reason || "").trim(),
+    provider: PROVIDER,
+  };
+}
+
 function parseJsonFromContent(content) {
   const text = (content || "").trim();
   const block = text.match(/```json?\s*([\s\S]*?)```/i);
@@ -264,44 +350,23 @@ app.post("/api/song/guess", requireClientAuth, requireApiKey, async (req, res) =
   try {
     const { text, langMode = "auto" } = req.body || {};
     if (!text?.trim()) return res.status(400).json({ error: "缺少 text" });
-
-    const langHint =
-      langMode === "en"
-        ? "可能是英文歌"
-        : langMode === "ja"
-          ? "可能是日文歌"
-          : langMode === "zh"
-            ? "可能是中文歌"
-            : "可能是中文、英文或日文歌";
-
-    const content = await chatComplete([
-      {
-        role: "system",
-        content:
-          "你是音乐识曲专家。用户哼唱或念出的文字可能是歌词片段、歌名或语音识别误差。请推测最可能的歌曲。只输出 JSON，不要 markdown，不要解释。格式：{\"title\":\"歌名\",\"artist\":\"歌手\",\"confidence\":0-100,\"reason\":\"简短理由\",\"alternatives\":[{\"title\":\"\",\"artist\":\"\"}]}",
-      },
-      {
-        role: "user",
-        content: `${langHint}。用户输入：\n${text.trim()}`,
-      },
-    ]);
-
-    const parsed = parseJsonFromContent(content);
-    if (!parsed?.title) {
-      return res.status(422).json({ error: "AI 未能识别歌曲" });
-    }
-
-    res.json({
-      title: String(parsed.title).trim(),
-      artist: String(parsed.artist || "").trim(),
-      confidence: Math.min(99, Math.max(0, Number(parsed.confidence) || 70)),
-      reason: String(parsed.reason || "").trim(),
-      alternatives: Array.isArray(parsed.alternatives) ? parsed.alternatives.slice(0, 3) : [],
-      provider: PROVIDER,
-    });
+    const result = await identifySongWithLyrics(text, langMode);
+    res.json(result);
   } catch (err) {
     console.error("Guess error:", err);
     res.status(500).json({ error: err.message || "猜歌失败" });
+  }
+});
+
+app.post("/api/song/identify", requireClientAuth, requireApiKey, async (req, res) => {
+  try {
+    const { text, langMode = "auto" } = req.body || {};
+    if (!text?.trim()) return res.status(400).json({ error: "缺少 text" });
+    const result = await identifySongWithLyrics(text, langMode);
+    res.json(result);
+  } catch (err) {
+    console.error("Identify error:", err);
+    res.status(500).json({ error: err.message || "识曲失败" });
   }
 });
 
